@@ -1,0 +1,8 @@
+*__pycache__*
+*.csv 
+*.h5
+*.png
+*.mp4
+*.zip
+*.out
+*.egg-info/
