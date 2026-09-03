@@ -1,0 +1,100 @@
+default: {lever: [55, 230], pad: [315, 348]}
+
+
+# ----------------------------------- LEFT ----------------------------------------
+rules:
+  - when:
+      rat: 531
+      view: left
+    value: {lever: [55, 230], pad: [315, 355]}
+
+  - when:
+      rat: 317
+      view: left
+    value: {lever: [55, 230], pad: [315, 348]}
+
+  - when:
+      rat: 525
+      view: left
+    value: {lever: [55, 230], pad: [315, 348]}
+
+# may
+  - when:
+      rat: 517
+      month: 5
+      view: left
+    value: {lever: [80, 205], pad: [350, 330]}
+
+  - when:
+      rat: 531
+      month: 5
+      view: left
+    value: {lever: [80, 210], pad: [353, 335]}
+
+  - when:
+      rat: 525
+      month: 5
+      condition: Conti 
+      view: left
+    value: {lever: [80, 220], pad: [328, 340]}
+
+  - when:
+      rat: 525
+      month: 5
+      condition: NOstim
+      view: left
+    value: {lever: [80, 210], pad: [328, 340]}
+
+  - when:
+      rat: 525
+      day: 27
+      month: 5
+      view: left
+    value: {lever: [80, 205], pad: [350, 330]}
+
+
+
+
+# ----------------------------------- RIGHT ----------------------------------------
+
+  - when:
+      rat: 517
+      view: right
+    value: {lever: [445, 210], pad: [150, 335]}
+
+  - when:
+      rat: 531
+      view: right
+    value: {lever: [457, 230], pad: [197, 355]}
+
+# may
+  - when:
+      rat: 521
+      day: 21
+      month: 5
+      view: right
+    value: {lever: [445, 205], pad: [170, 345]}
+
+  - when:
+      rat: 521
+      day: 22
+      month: 5
+      view: right
+    value: {lever: [445, 205], pad: [170, 345]}
+
+
+  - when:
+      rat: 521
+      day: 28
+      month: 5
+      view: right
+    value: {lever: [445, 210], pad: [175, 335]}
+
+  - when:
+      rat: 521
+      day: 24
+      month: 5
+      view: right
+    value: {lever: [445, 210], pad: [175, 335]}
+
+    

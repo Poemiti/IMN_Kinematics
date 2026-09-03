@@ -1,0 +1,21 @@
+# Input data
+model: "/media/filer2/T4b/UserFolders/Poemiti/Reaching-DLC-model-main/data/model/DLC-Poe-2026-03-27/"
+raw_videos: "/media/filer2/T4b/UserFolders/Raphael/Raphael_M2_2024/Opto_SkilledReaching_2024_experiments/MOVIES/"
+
+# Output folder
+data_root: ./data
+database: "{data_root}/database"
+
+# Inter-rat
+inter_rat: "{data_root}/inter_rat"
+
+# Per-rat
+rat_root: "{data_root}/rat_{rat_name}"
+raw_clips: "{rat_root}/raw_clips"
+
+processed: "{rat_root}/processed"
+dlc: "{processed}/dlc"
+metrics: "{processed}/metrics"
+luminosity: "{processed}/luminosity"
+preprocessing: "{processed}/preprocessing"
+analysis: "{rat_root}/analysis_{bodypart}"

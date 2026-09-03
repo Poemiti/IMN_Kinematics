@@ -1,0 +1,30 @@
+default: 1811
+
+rules:
+  - when:
+      view: left
+    value: 1814
+
+  - when:
+      view: right
+    value: 1811
+
+  - when:
+      condition: Beta
+      month: 5
+      view: left
+    value: 1813
+
+  - when:
+      condition: Conti
+      month: 5
+      view: left
+    value: 1812
+
+  - when:
+      condition: NOstim
+      month: 5
+      view: left
+    value: 1813
+
+    

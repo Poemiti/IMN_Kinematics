@@ -1,0 +1,29 @@
+# BetaMouv
+# Experimentator : Raphael
+# Reaching lever task with optogenetic stimulation. Stimulation can either be in the left or right hemisfere. 
+# One Hemisfere got CHRIMSON opsine depletion, it will be called the 'contra_hemi'
+
+# Hyperparameters 
+fps: 30
+camera_view: ["left", "right"]
+
+condition: 
+	laser_type: 
+		Beta
+		Conti
+		NOstim
+	laser_state:
+		LaserOn
+		LaserOff
+		NOstim
+	laser_intensities: 
+		Beta: 
+			2,5mW
+			1mW
+		Conti: 
+			0,5mW
+			0,75mW
+		NOstim: 
+			NOstim
+			0mW
+    
