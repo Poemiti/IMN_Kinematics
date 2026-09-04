@@ -1,0 +1,24 @@
+# Conditions name
+
+laser_type:
+  - Beta
+  - Conti
+  - NOstim
+
+laser_state:
+  - LaserOn
+  - LaserOff
+  - NOstim
+
+laser_intensities:
+  Beta:
+    - "2,5mW"
+    - "1mW"
+
+  Conti:
+    - "0,5mW"
+    - "0,75mW"
+
+  NOstim:
+    - NOstim
+    - "0mW"
