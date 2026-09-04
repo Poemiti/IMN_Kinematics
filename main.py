@@ -71,25 +71,11 @@ cfg = load_cfg(Path("./config.yaml"))
 project_name = cfg["project_name"]
 project = load_project(project_name)
 
-print(project)
-
-CONFIG_DIR: Path = Path(f"./config/{project_name}")
-DATA_DIR: Path = Path(f"./data/{project_name}")
-LOG_DIR: Path = Path(f"./logs/{project_name}")
-SRC_DIR: Path = Path(f"./src/{project_name}")
-
-
-print("\nProject directories are :")
-print(CONFIG_DIR)
-print(DATA_DIR)
-print(LOG_DIR)
-print(SRC_DIR)
-
 
 if cfg["steps"]["prediction"]:
-    project.Prediction.run()
+    project.run_prediction()
 
-# if cfg["steps"]["validation"]:
+# if cfg["steps"]["preprocessing"]:
 #     project.Validation.run()
 
 # if cfg["steps"]["compute_metrics"]:

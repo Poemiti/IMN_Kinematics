@@ -10,8 +10,8 @@ config_log: None
 # Boolean only
 
 steps:
-  prediction: false
-  validation: false
+  prediction: true
+  preprocessing: false
   compute_metrics: false
 
   make_figures:
