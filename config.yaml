@@ -10,7 +10,8 @@ config_log: None
 # Boolean only
 
 steps:
-  prediction: true
+  prediction: false
+  build_metadata: true
   preprocessing: false
   compute_metrics: false
 

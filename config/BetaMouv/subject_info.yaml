@@ -1,36 +1,36 @@
 # BetaMouv Subject
 # 8 rats have been train to perform the reaching task
 
+subjects: 
+  "#516":
+    contra_hemi: right
+    handedness: ambi
 
-"#516":
-	contra_hemi: right
-	handedness: ambi
+  "#517":
+    contra_hemi: left
+    handedness: ambi
 
-"#517":
-  contra_hemi: left
-  handedness: ambi
+  "#519":
+    contra_hemi: right
+    handedness: ambi
 
-"#519":
-  contra_hemi: right
-  handedness: ambi
+  "#521":
+    contra_hemi: left
+    handedness: right
 
-"#521":
-  contra_hemi: left
-  handedness: right
+  "#525":
+    contra_hemi: left
+    handedness: ambi
 
-"#525":
-  contra_hemi: left
-  handedness: ambi
+  "#527":
+    contra_hemi: left
+    handedness: right
 
-"#527":
-  contra_hemi: left
-  handedness: right
+  "#531":
+    contra_hemi: right
+    handedness: left
 
-"#531":
-  contra_hemi: right
-  handedness: left
-
-"#529":
-  contra_hemi: right
-  handedness: ambi
+  "#529":
+    contra_hemi: right
+    handedness: ambi
 

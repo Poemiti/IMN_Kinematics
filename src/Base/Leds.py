@@ -31,7 +31,7 @@ class Leds:
         self.clean_luminosities()
 
     
-    def get_luminosity(self) -> pd.DataFrame :
+    def get_luminosity(self, max_n_frames: int = None) -> pd.DataFrame :
         from label_studio_sdk import LabelStudio
 
         ls_client = LabelStudio(base_url=self.label_studio_url, api_key=self.api_key)
@@ -104,7 +104,7 @@ class Leds:
         luminosity_df = luminosities.to_dataframe(name="luminosity").unstack("led_name")
 
         # save as a csv file
-        if self.csv_ouput_path is not None : 
+        if self.csv_output_path is not None : 
             luminosity_df.to_csv(self.csv_ouput_path)
 
         return luminosity_df

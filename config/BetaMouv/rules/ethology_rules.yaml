@@ -34,14 +34,14 @@ rules:
   - when:
       rat: 525
       month: 5
-      condition: Conti 
+      laser_type: Conti 
       view: left
     value: {lever: [80, 220], pad: [328, 340]}
 
   - when:
       rat: 525
       month: 5
-      condition: NOstim
+      laser_type: NOstim
       view: left
     value: {lever: [80, 210], pad: [328, 340]}
 

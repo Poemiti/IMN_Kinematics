@@ -75,6 +75,9 @@ project = load_project(project_name)
 if cfg["steps"]["prediction"]:
     project.run_prediction()
 
+if cfg["steps"]["build_metadata"]:
+    project.build_metadata()
+
 # if cfg["steps"]["preprocessing"]:
 #     project.Validation.run()
 

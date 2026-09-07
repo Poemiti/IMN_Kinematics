@@ -13,7 +13,7 @@ class Leds(BaseLed):
     def __init__(self, video_path, label_studio_annotation, fig_output_path = None, csv_output_path = None):
         super().__init__(video_path, label_studio_annotation, fig_output_path, csv_output_path)
 
-        self.cue_type = self.define_cue_type(self.luminosities["LED_1"])
+        self.cue_type = self.define_cue_type()
 
         # cue L1: Left paw : LED 3
         # cue L2: Right paw: LED 2
@@ -50,7 +50,9 @@ class Leds(BaseLed):
         time = 0
         cue_count = 0
 
-        for t, luminosity in enumerate(self.luminosities) :
+        print(self.luminosities)
+
+        for t, luminosity in enumerate(self.luminosities["LED_1"]) :
             luminosity = float(luminosity) 
 
             if luminosity >= threshold : 
@@ -71,8 +73,8 @@ class Leds(BaseLed):
         return cue_type
 
 
-
-    def led_state(self,
+    @staticmethod
+    def led_state(luminosities: pd.DataFrame,
                 threshold: float = 100,
                 min_duration: int = 10,
                 comparator: operator = operator.lt,) -> tuple[bool, int]:
@@ -80,7 +82,7 @@ class Leds(BaseLed):
         consecutive = 0
         start_index = None
 
-        for t, value in enumerate(self.luminosities):
+        for t, value in enumerate(luminosities):
             value = float(value)
 
             if comparator(value, threshold):

@@ -10,6 +10,7 @@ class Trial:
     def __init__(self, clip_path: Path):
 
         self.file = File(clip_path)
+        self.group = "Not_defined"
 
 
     def to_dict(self) -> dict:

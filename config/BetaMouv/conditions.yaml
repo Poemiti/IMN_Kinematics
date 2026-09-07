@@ -1,24 +1,17 @@
-# Conditions name
+# filter criteria before launching preprocessing / analysis etc...
 
-laser_type:
-  - Beta
-  - Conti
-  - NOstim
+# movement type
+CONTRA: true
+IPSI: false
 
-laser_state:
-  - LaserOn
-  - LaserOff
-  - NOstim
+# condition
+CHR: true
+CTRL: false
 
-laser_intensities:
-  Beta:
-    - "2,5mW"
-    - "1mW"
-
-  Conti:
-    - "0,5mW"
-    - "0,75mW"
-
-  NOstim:
-    - NOstim
-    - "0mW"
+# subject
+"#517": false
+"#525": false
+"#521": false
+"#531": false
+"#527": false
+"#516": false

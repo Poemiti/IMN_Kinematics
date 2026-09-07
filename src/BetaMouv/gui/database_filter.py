@@ -266,12 +266,13 @@ def make_database(root_dir : Path, satisfy_condition):
     from src.BetaMouv.File import File
 
     sorted_videos = []
-    for file_path in root_dir.rglob("*"):
+    for file_path in root_dir.rglob("*.*"):
 
         file = File(file_path)
 
-        if satisfy_condition(file.name):
-            file.classify_file(file_path, sorted_videos)
+        if satisfy_condition(file.path.name):
+            file.classify_file(sorted_videos)
+
     return pd.DataFrame(sorted_videos)
 
 

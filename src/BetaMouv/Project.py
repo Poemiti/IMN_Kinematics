@@ -27,6 +27,7 @@ class Project(BaseProject):
             self.paths[pname] = Path(path)
 
         self.conditions = self._load_config(self.config_dir / "conditions.yaml")
+        self.subject_info = self._load_config(self.config_dir / "subject_info.yaml")
 
         # setup rules
         self.annotation_rules = self._load_config(self.config_dir / "rules/annotation_rules.yaml")
@@ -71,8 +72,8 @@ class Project(BaseProject):
             # prediction 
 
             Prediction(video_obj=video,
-                            paths=self.paths,
-                            clip_duration=clip_duration)
+                        paths=self.paths,
+                        clip_duration=clip_duration)
 
         print("Done!")
 
@@ -80,7 +81,7 @@ class Project(BaseProject):
     def build_metadata(self): 
         import joblib
 
-        dataset = data_filter.load_database(self.paths["raw_clip"], self.paths["database"], "video")
+        dataset = data_filter.load_database(self.paths["raw_clips"], self.paths["database"], "video")
 
         output_dir = self.paths["metrics"]
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -91,22 +92,32 @@ class Project(BaseProject):
 
             trial = Trial(clip_path=clip_path)
 
-            # get annotation number
-            with open("./annotation_rules.yaml") as f:
-                annotation_rules = yaml.safe_load(f)
+            print(f"Building metadata of: {trial.file.name}")
 
+            # get annotation number
             annotation_meta = {
-                "condition": trial.file.condition, 
+                "laser_type": trial.file.laser_type, 
                 "view": trial.file.camera_view,
                 "month": trial.file.date.month,
             }
-            label_studio_annotation = u.match_rule(annotation_meta, annotation_rules)
+            label_studio_annotation = u.match_rule(annotation_meta, self.annotation_rules)
+
+            print(f"label studio annotation: {label_studio_annotation}")
+            print(f"annotation meta: {annotation_meta}")
 
             # get Leds info to tell the Laser state (LaserOn, LaserOff)
             leds = Leds(video_path=clip_path, 
-                        label_studio_annotation=label_studio_annotation)
+                        label_studio_annotation=label_studio_annotation,
+                        )
+
+            if (trial.file.camera_view == "left" and leds.cue_type == "CueL2") or \
+               (trial.file.camera_view == "right" and leds.cue_type == "CueL1") : 
+                print(f"Camera: {trial.file.camera_view} | cue: {leds.cue_type} ! Not compatible\n")
+                continue
 
             trial.set_led_info(leds)
+            trial.set_mvt_type(self.subject_info["subjects"][trial.file.subject]["contra_hemi"])
+            trial.set_group()
             trial.save_trial()
 
             # Add trial to its group
@@ -118,9 +129,20 @@ class Project(BaseProject):
             joblib.dump(trials, output_dir / f"{group}.joblib")
             print(f"  {group}: {len(trials)}")
 
+
+        print("\nVisualisation of the proportion of each experimental condition\n")
+
+        # TODO
+        # refaire la fonction de metadata report pour afficher le nombre
+        # d'essai par groupe
+        # u.metadata_report(...)
+
+
         print("Done!")
             
             
             
+    def run_preprocessing(self): 
+        
 
-            
+        pass

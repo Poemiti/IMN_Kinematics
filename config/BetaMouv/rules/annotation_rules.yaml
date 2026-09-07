@@ -10,19 +10,19 @@ rules:
     value: 1811
 
   - when:
-      condition: Beta
+      laser_type: Beta
       month: 5
       view: left
     value: 1813
 
   - when:
-      condition: Conti
+      laser_type: Conti
       month: 5
       view: left
     value: 1812
 
   - when:
-      condition: NOstim
+      laser_type: NOstim
       month: 5
       view: left
     value: 1813

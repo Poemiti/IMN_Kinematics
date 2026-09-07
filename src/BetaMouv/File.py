@@ -14,26 +14,24 @@ class File(BaseFile):
         trial_metadata = self.parse_filename()
 
         self.date = datetime.strptime(trial_metadata["date"], "%Y%m%d").date()
-        self.camera_view = trial_metadata["camera_view"]
+        self.camera_view = "left" if trial_metadata["camera_view"] == "H001" else "right"
         self.clip_number = trial_metadata["clip"]
-        self.rat_name = trial_metadata["rat_name"]
-        self.rat_type = trial_metadata["rat_type"]
+        self.subject = trial_metadata["subject"]
         self.condition = trial_metadata["condition"]
+        self.laser_type = trial_metadata["laser_type"]
         self.stim_location = trial_metadata["stim_location"]
         self.handedness = trial_metadata["handedness"]
         self.session = trial_metadata["session"]
         self.laser_intensity = trial_metadata["laser_intensity"]
-
-        self.laser_state = "Unknown"
 
 
     def parse_filename(self) -> dict:
         import re
         
         PATTERNS = {
-                "rat_name": r"#\d{3}",
-                "rat_type": r"(CTRL|CHR)",
-                "condition": r"(Conti|NOstim|Beta)",
+                "subject": r"#\d{3}",
+                "condition": r"(CTRL|CHR)",
+                "laser_type": r"(Conti|NOstim|Beta)",
                 "stim_location": r"(LeftHemi|RightHemi|Ipsi|ipsi|Bilateral|Contra|contra)",
                 "handedness": r"(Ambidexter|LeftHanded|RightHanded)",
                 "session": r"S\d+",
@@ -70,11 +68,11 @@ class File(BaseFile):
         # Second pass: derived defaults 
         if result["laser_intensity"] == "Unknown" :
 
-            if result["condition"] == "Beta":
+            if result["laser_type"] == "Beta":
                 result["laser_intensity"] = "1mW"
-            elif result["condition"] == "Conti":
+            elif result["laser_type"] == "Conti":
                 result["laser_intensity"] = "0,5mW"
-            elif result["condition"] == "NOstim":
+            elif result["laser_type"] == "NOstim":
                 result["laser_intensity"] = "NOstim"
 
         return result
@@ -101,9 +99,9 @@ class File(BaseFile):
         -------
         None"""
         
-        metadata = self.parse_filename(self.name)
+        metadata = self.parse_filename()
 
-        if metadata["rat_type"] == "Unknown" : 
+        if metadata["condition"] == "Unknown" : 
             metadata = self.parse_filename(self.path.parent.name)
 
         metadata.pop("clip", None)
@@ -115,6 +113,3 @@ class File(BaseFile):
         })
 
 
-
-    def set_group(self): 
-        self.group = f"{self.rat_name}_{self.rat_type}_{self.condition}_{self.stim_location}_{self.camera_view}_{self.laser_intensity}_{self.laser_state}"
