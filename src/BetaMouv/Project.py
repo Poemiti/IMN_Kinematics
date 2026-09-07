@@ -5,7 +5,7 @@ from src.Base.Video import Video
 
 from .Trial import Trial
 from .Prediction import Prediction
-from .Validation import Validation
+from .Leds import Leds
 
 from pathlib import Path
 import yaml
@@ -17,10 +17,6 @@ class Project(BaseProject):
 
     def __init__(self, name, config_dir):
         super().__init__(name, config_dir)
-
-        self.trial = Trial
-        self.prediction = Prediction
-        self.validation = Validation
 
         self.config_dir = config_dir
         self.name = name
@@ -74,18 +70,57 @@ class Project(BaseProject):
 
             # prediction 
 
-            self.prediction.dlc_predict(video=video, 
-                                        output_dir=self.paths["raw_clips"],
-                                        clip_duration=clip_duration,
-                                        fps=30,
-                                        model_path=self.paths["model"])
+            Prediction(video_obj=video,
+                            paths=self.paths,
+                            clip_duration=clip_duration)
+
+        print("Done!")
 
 
     def build_metadata(self): 
+        import joblib
 
-        dataset = data_filter.load_database(self.paths["raw_videos"], self.paths["database"], "csv")
+        dataset = data_filter.load_database(self.paths["raw_clip"], self.paths["database"], "video")
 
         output_dir = self.paths["metrics"]
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        
+        trials_by_group = {}
+
+        for i, clip_path in enumerate(dataset["filename"].iloc[:]):
+
+            trial = Trial(clip_path=clip_path)
+
+            # get annotation number
+            with open("./annotation_rules.yaml") as f:
+                annotation_rules = yaml.safe_load(f)
+
+            annotation_meta = {
+                "condition": trial.file.condition, 
+                "view": trial.file.camera_view,
+                "month": trial.file.date.month,
+            }
+            label_studio_annotation = u.match_rule(annotation_meta, annotation_rules)
+
+            # get Leds info to tell the Laser state (LaserOn, LaserOff)
+            leds = Leds(video_path=clip_path, 
+                        label_studio_annotation=label_studio_annotation)
+
+            trial.set_led_info(leds)
+            trial.save_trial()
+
+            # Add trial to its group
+            trials_by_group.setdefault(trial.group, []).append(trial)
+
+        # Save one big joblib per group
+        for group, trials in trials_by_group.items():
+
+            joblib.dump(trials, output_dir / f"{group}.joblib")
+            print(f"  {group}: {len(trials)}")
+
+        print("Done!")
+            
+            
+            
+
+            

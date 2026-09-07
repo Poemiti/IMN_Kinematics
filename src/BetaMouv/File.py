@@ -24,6 +24,8 @@ class File(BaseFile):
         self.session = trial_metadata["session"]
         self.laser_intensity = trial_metadata["laser_intensity"]
 
+        self.laser_state = "Unknown"
+
 
     def parse_filename(self) -> dict:
         import re
@@ -111,3 +113,8 @@ class File(BaseFile):
             "filename": str(self.path),
             **metadata
         })
+
+
+
+    def set_group(self): 
+        self.group = f"{self.rat_name}_{self.rat_type}_{self.condition}_{self.stim_location}_{self.camera_view}_{self.laser_intensity}_{self.laser_state}"

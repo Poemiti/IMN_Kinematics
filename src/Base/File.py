@@ -12,3 +12,4 @@ class File:
             raise FileNotFoundError(f"File does not exist: {self.path}")
         
         self.name = self.path.stem
+        self.group = None

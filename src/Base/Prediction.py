@@ -6,8 +6,8 @@ import pandas as pd
 
 class Prediction: 
 
-    def __init__(self, video: Video):
-         self.video: Video = video
+    def __init__(self, video_obj: Video):
+         self.video: Video = video_obj
 
 
     def split_video(self, input_path: Path, output_dir: Path,
