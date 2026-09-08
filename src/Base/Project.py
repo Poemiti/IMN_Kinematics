@@ -5,7 +5,7 @@ from pathlib import Path
 
 class Project:
 
-    def __init__(self, name: str, config_dir: Path):
+    def __init__(self, name: str):
         self.name = name
 
         self.trial_class = None
@@ -17,6 +17,6 @@ class Project:
         desc = f"""
         ================= Project info =================
         Project name: {self.name}
-        Config directory: {self.config_dir}
+        Config directory: config/{self.name}/
         ================================================\n"""
         return desc
