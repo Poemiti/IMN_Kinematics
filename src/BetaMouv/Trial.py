@@ -9,7 +9,7 @@ from .File import File
 
 class Trial(BaseTrial): 
 
-    def __init__(self, clip_path: str):
+    def __init__(self, clip_path: str, yaml_path: str = None):
         
         super().__init__(clip_path)
 
@@ -48,24 +48,35 @@ class Trial(BaseTrial):
             "group": self.group,
             }
 
-    def open_trial(self, yaml_path: str): 
-            with open(yaml_path, "r") as f:
+    def load_yaml_trial(self): 
+            with open(self.yaml_path, "r") as f:
                 data = yaml.safe_load(f)
+
+            # TODO
+            # finir l'initialisation des attribut (respect des object comme date)
     
             self.laser_state = data.get("laser_state", "Not_defined")
             self.cue_type = data.get("cue_type", "Not_defined")
             self.time_pad_off = data.get("time_pad_off", "Not_defined")
             self.time_laser_on = data.get("time_laser_on", "Not_defined")
             self.time_reward = data.get("time_reward", "Not_defined")
-            self.file.set_group()
+            self.set_group()
 
 
-    def set_mvt_type(self, contra_hemi: str):
-        print(contra_hemi)
-        print(self.file.stim_location)
-        print(self.cue_type)
+    def set_mvt_type(self, hemi_info: str):
+        contra_rule = {
+             "CueL1": "RightHemi",  # if stimulation in right hemi - task must be left L1
+             "CueL2": "LeftHemi"    # if stimulation in left hemi - task must be right L2
+        }
+        print(hemi_info)
 
-        self.movement_type = "CONTRA" if self.file.stim_location == contra_hemi else "IPSI"
+        if hemi_info[self.file.condition]  == self.file.stim_location and \
+           contra_rule[self.cue_type] == self.file.stim_location : 
+
+            self.movement_type = "CONTRA"
+        else : 
+            self.movement_type = "IPSI"        
+
 
 
     def set_led_info(self, led_obj: Leds): 
