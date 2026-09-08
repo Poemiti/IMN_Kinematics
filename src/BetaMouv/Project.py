@@ -3,7 +3,9 @@
 from src.Base.Project import Project as BaseProject
 from src.Base.Video import Video
 
+from .PathConfig import PathConfig
 from .Trial import Trial
+from .TrialGroup import TrialGroup
 from .Prediction import Prediction
 from .Leds import Leds
 
@@ -15,26 +17,23 @@ import src.BetaMouv.gui.database_filter as data_filter
 
 class Project(BaseProject):
 
-    def __init__(self, name, config_dir):
-        super().__init__(name, config_dir)
+    def __init__(self, name: str):
+        super().__init__(name)
 
-        self.config_dir = config_dir
-        self.name = name
+        self.name: str = name
+        self.config_dir: Path = Path(f"./config/{self.name}/")
 
-        # setup config path
-        self.paths = self._load_config(self.config_dir / "paths.yaml")
-        for pname, path in self.paths.items(): 
-            self.paths[pname] = Path(path)
-
-        self.conditions = self._load_config(self.config_dir / "conditions.yaml")
-        self.subject_info = self._load_config(self.config_dir / "subject_info.yaml")
+        self.conditions: dict = self._load_config(self.config_dir / "conditions.yaml")
+        self.subject_info: dict = self._load_config(self.config_dir / "subject_info.yaml")
 
         # setup rules
-        self.annotation_rules = self._load_config(self.config_dir / "rules/annotation_rules.yaml")
-        self.clip_duration_rules = self._load_config(self.config_dir / "rules/clip_duration_rules.yaml")
-        self.ethology_rules = self._load_config(self.config_dir / "rules/ethology_rules.yaml")
-        self.exclusion_rules = self._load_config(self.config_dir / "rules/exclusion_rules.yaml")
+        self.annotation_rules: dict = self._load_config(self.config_dir / "rules/annotation_rules.yaml")
+        self.clip_duration_rules: dict = self._load_config(self.config_dir / "rules/clip_duration_rules.yaml")
+        self.ethology_rules: dict = self._load_config(self.config_dir / "rules/ethology_rules.yaml")
+        self.exclusion_rules: dict = self._load_config(self.config_dir / "rules/exclusion_rules.yaml")
 
+        # setup path
+        self.path: PathConfig = PathConfig(project_name=self.name)
 
     @staticmethod
     def _load_config(filename: Path):
@@ -116,7 +115,7 @@ class Project(BaseProject):
                 continue
 
             trial.set_led_info(leds)
-            trial.set_mvt_type(self.subject_info["subjects"][trial.file.subject]["contra_hemi"])
+            trial.set_mvt_type(self.subject_info[trial.file.subject]["hemi"])
             trial.set_group()
             trial.save_trial()
 
@@ -143,6 +142,20 @@ class Project(BaseProject):
             
             
     def run_preprocessing(self): 
-        
 
-        pass
+        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
+
+        trialgroup = TrialGroup(joblib_filenames, self.conditions)
+
+        for t in trialgroup.trials: 
+            print(t.file.name)
+
+
+    def run_analysis(self): 
+
+        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
+
+        trialgroup = TrialGroup(joblib_filenames, self.conditions)
+        print(trialgroup.keep_val)
+
+        # self.path.results_root(trialgroup.keep_val)
