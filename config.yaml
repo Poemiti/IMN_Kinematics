@@ -11,13 +11,13 @@ config_log: None
 
 steps:
   prediction: false
-  build_metadata: true
-  preprocessing: false
+  build_metadata: false
+  preprocessing: true
   compute_metrics: false
 
-  make_figures:
-    single_subject: false
-    single_trial: false
-    inter_subject: false
+  # make_figures:
+  #   single_subject: false
+  #   single_trial: false
+  #   inter_subject: false
 
 
