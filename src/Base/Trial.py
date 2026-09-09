@@ -7,28 +7,49 @@ import yaml
 import pandas as pd
 
 class Trial:
+    # Subclasses extend this list with their own fields.
+    FIELDS: tuple = ()
 
-    def __init__(self, clip_path: Path):
+    def __init__(self, clip_path: str, yaml_path: str = None):
+        self.clip_path = clip_path
+        self.yaml_path = Path(yaml_path) if yaml_path else Path(clip_path).with_suffix(".yaml")
 
-        self.file = File(clip_path)
-        self.group = "Not_defined"
+
+    def update(self, **kwargs):
+        """Generic setter for any declared field """
+
+        for key, value in kwargs.items():
+            if key not in self.FIELDS:
+                raise AttributeError(
+                    f"'{key}' is not a declared field of {type(self).__name__} "
+                    f"(check FIELDS or a typo)"
+                )
+            setattr(self, key, value)
+        return self  # allows chaining: trial.update(...).update(...)
 
 
     def to_dict(self) -> dict:
-        return {"name": self.file.name,
-                "clip_path": str(self.file.path),}
+        return {field: getattr(self, field, None) for field in self.FIELDS}
 
 
-    def save_trial(self):
-        yaml_path =  self.file.path.parent / f"{self.file.name}.yaml"
+    def from_dict(self, data: dict):
+        for field in self.FIELDS:
+            if field in data:
+                setattr(self, field, data[field])
+        return self
 
-        with open((yaml_path) , "w") as f : 
-            yaml.safe_dump(self.to_dict(), f)
 
-        # TODO
-        # verifier si le fichier existe deja, 
-        # si cest deja le cas, demander veification ????
-        # handle existance
+    def save_yaml(self, path: str = None):
+        path = path or self.yaml_path
+        with open(path, "w") as f:
+            yaml.safe_dump(self.to_dict(), f, sort_keys=False)
+
+
+    def load_yaml(self, path: str = None):
+        path = path or self.yaml_path
+        with open(path, "r") as f:
+            data = yaml.safe_load(f)
+        return self.from_dict(data)
 
 
     def dlc_predict(self, model_path: Path, 
@@ -43,7 +64,7 @@ class Trial:
             # print(dlc_dest)
             deeplabcut.analyze_videos(
                 f'{model_path}/config.yaml',
-                [str(self.file.path)],
+                [str(self.clip_path)],
                 save_as_csv=False,
                 # gputouse=0,
                 destfolder=dlc_dest
