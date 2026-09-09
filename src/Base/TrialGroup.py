@@ -20,12 +20,12 @@ class TrialGroup:
 
         for filename in self.filenames:
             if self._keep_file(filename):
-                print(f"{filename.name}: keep")
+                print(f"Keep: {filename.name}")
 
                 file_trials = joblib.load(filename)
                 trials.extend(file_trials)
             else : 
-                print(f"{filename.name}: not keep")
+                print(f"Not Keep: {filename.name}")
 
         return trials
 
@@ -34,21 +34,23 @@ class TrialGroup:
 
         name = filename.name
 
-        self.keep_val = [value
-            for value, keep in self.condition.items()
-            if keep]
+        for condition, criteria in self.condition.items():
 
-        # If this category has active filters,
-        # filename must match one of them.
-        if self.keep_val and not all(value in name for value in self.keep_val):
-            return False
+            self.keep_val = [value
+                for value, keep in criteria.items()
+                if keep]
 
-        # Explicit exclusions
-        self.not_keep_val = [value
-            for value, keep in self.condition.items()
-            if not keep]
+            # If this category has active filters,
+            # filename must match one of them.
+            if self.keep_val and not any(value in name for value in self.keep_val):
+                return False
 
-        if any(value in name for value in self.not_keep_val):
-            return False
+            # Explicit exclusions
+            self.not_keep_val = [value
+                for value, keep in criteria.items()
+                if not keep]
+
+            if any(value in name for value in self.not_keep_val):
+                return False
 
         return True

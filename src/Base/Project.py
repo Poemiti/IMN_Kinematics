@@ -8,11 +8,6 @@ class Project:
     def __init__(self, name: str):
         self.name = name
 
-        self.trial_class = None
-        self.prediction_class = None
-        self.validation_class = None
-
-
     def __str__(self):
         desc = f"""
         ================= Project info =================

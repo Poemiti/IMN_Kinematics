@@ -1,17 +1,20 @@
 # filter criteria before launching preprocessing / analysis etc...
 
 # movement type
-CONTRA: true
-IPSI: false
+mvt_type: 
+  CONTRA: true
+  IPSI: false
 
 # condition
-CHR: true
-CTRL: false
+condition: 
+  CHR: true
+  CTRL: false
 
 # subject
-"#517": false
-"#525": false
-"#521": false
-"#531": true
-"#527": false
-"#516": false
+subject: 
+  "#517": true
+  "#525": false
+  "#521": false
+  "#531": true
+  "#527": false
+  "#516": false
