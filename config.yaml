@@ -9,11 +9,13 @@ config_log: None
 # Analysis step to launch
 # Boolean only
 
-steps:
-  prediction: false
+steps:  # ordered
+  split_trials: false
   build_metadata: false
-  preprocessing: true
+  run_prediction: false
+  preprocessing: false
   compute_metrics: false
+  analysis: false
 
   # make_figures:
   #   single_subject: false
