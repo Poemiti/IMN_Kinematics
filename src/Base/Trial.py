@@ -4,6 +4,7 @@
 from .File import File
 from pathlib import Path
 import yaml
+import pandas as pd
 
 class Trial:
 
@@ -28,6 +29,35 @@ class Trial:
         # verifier si le fichier existe deja, 
         # si cest deja le cas, demander veification ????
         # handle existance
+
+
+    def dlc_predict(self, model_path: Path, 
+                    output_csv_path : Path = None) -> pd.DataFrame:
+        import tempfile
+        import deeplabcut
+        from deeplabcut.pose_estimation_pytorch import set_load_weights_only
+
+        set_load_weights_only(False)
+
+        with tempfile.TemporaryDirectory() as dlc_dest:
+            # print(dlc_dest)
+            deeplabcut.analyze_videos(
+                f'{model_path}/config.yaml',
+                [str(self.file.path)],
+                save_as_csv=False,
+                # gputouse=0,
+                destfolder=dlc_dest
+            )
+
+            h5_file = next(Path(dlc_dest).glob("*.h5"), None)
+            df = pd.read_hdf(h5_file)
+
+        df.index.name="frame_num"
+
+        if output_csv_path : 
+            df.to_csv(output_csv_path)
+
+        return df
 
 
 
