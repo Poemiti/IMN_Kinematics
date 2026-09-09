@@ -2,24 +2,24 @@
 
 from pathlib import Path
 import cv2
-from .File import File
+from .File import File as BaseFile
 
 class Video: 
 
+    file_cls = BaseFile   # overridden by subclasses
+
     def __init__(self, video_path: Path):
 
-        self.file = File(video_path)
+        self.file = self.file_cls(video_path)
         self.is_openable = True
 
-        # open video to get properties
         cap = cv2.VideoCapture(str(video_path))
 
-        # verify state of the video
         if not cap.isOpened():
             self.is_openable = False
-            print(f"[ERROR] {self.path}: cannot be opened")
+            print(f"[ERROR] {video_path}: cannot be opened")
 
-        self.date = self.file.date
+        self.date = self.file.date     # now this line is safe, IF file_cls has .date
         self.name = self.file.name
         self.path = self.file.path
         self.fps = int(cap.get(cv2.CAP_PROP_FPS))
@@ -88,9 +88,9 @@ class Video:
         self._run_ffmpeg(ffmpeg_args)
 
         # Re-probe FIXED video
-        total_duration = self.video.frame_count / FPS if FPS is not None else self.video.frame_count
-        if FPS is None : 
-            FPS = self.video.fps
+        total_duration = self.frame_count / FPS if FPS is not None else self.frame_count / self.fps
+        if FPS is None:
+            FPS = self.fps
 
         print(f"\nCRF : {CRF} | Video FPS : {FPS} | Video Duration : {total_duration:.2f} sec")
         print(f"Clip duration : {CLIP_DURATION}  |  Number of output clips : {round(total_duration / CLIP_DURATION)}\n")

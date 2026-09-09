@@ -1,7 +1,8 @@
 # src/utils.py
 
 from pathlib import Path
-
+import time
+from functools import wraps
 
 def match_rule(meta, rules):
     best_match = None
@@ -17,6 +18,32 @@ def match_rule(meta, rules):
                 best_score = score
 
     return best_match if best_match else rules.get("default")
+
+
+
+
+def process_time(func):
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+
+        start = time.perf_counter()
+        result = func(self, *args, **kwargs)
+        elapsed = time.perf_counter() - start
+
+        print(f"[{func.__name__}] Processing time: {_format_duration(elapsed)}")
+
+        return result
+    return wrapper
+
+def _format_duration(seconds: float) -> str:
+    if seconds < 60:
+        return f"{seconds:.1f} s"
+    
+    elif seconds < 3600:
+        return f"{seconds/60:.1f} min"
+    
+    return f"{seconds/3600:.1f} h"
+
 
 
 
