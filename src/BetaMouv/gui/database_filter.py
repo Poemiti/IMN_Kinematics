@@ -225,7 +225,7 @@ def load_database(files_path, database_path, source: str):
     controller = Controller(model, view)
     view.mainloop()
 
-    if controller.filtered_dataset is None: 
+    if controller.filtered_dataset is None or len(controller.filtered_dataset) == 0: 
         print("No database seletected, stop !")
         sys.exit()
 

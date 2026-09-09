@@ -2,10 +2,7 @@
 
 
 from src.Base.TrialGroup import TrialGroup as BaseTrialGroup
-from .Leds import Leds
-import yaml
-
-from .File import File
+from .Trial import Trial
 
 class TrialGroup(BaseTrialGroup): 
 

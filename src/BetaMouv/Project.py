@@ -1,12 +1,11 @@
 # src/BetaMouv/Project.py
 
 from src.Base.Project import Project as BaseProject
-from src.Base.Video import Video
+from .Video import Video
 
 from .PathConfig import PathConfig
 from .Trial import Trial
 from .TrialGroup import TrialGroup
-from .Prediction import Prediction
 from .Leds import Leds
 
 from pathlib import Path
@@ -20,7 +19,6 @@ class Project(BaseProject):
     def __init__(self, name: str):
         super().__init__(name)
 
-        self.name: str = name
         self.config_dir: Path = Path(f"./config/{self.name}/")
 
         self.conditions: dict = self._load_config(self.config_dir / "conditions.yaml")
@@ -33,7 +31,7 @@ class Project(BaseProject):
         self.exclusion_rules: dict = self._load_config(self.config_dir / "rules/exclusion_rules.yaml")
 
         # setup path
-        self.path: PathConfig = PathConfig(project_name=self.name)
+        self.paths: PathConfig = PathConfig(project_name=self.name)
 
     @staticmethod
     def _load_config(filename: Path):
@@ -42,47 +40,53 @@ class Project(BaseProject):
         return cfg
 
 
-    def run_prediction(self): 
+
+    def split_trials(self): 
 
         print(f"""
-        ================= Prediction =================
+        =============== Video Splitting ==============
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        dataset = data_filter.load_database(self.paths["raw_videos"], self.paths["database"], "video")
+        dataset = data_filter.load_database(self.paths.raw_videos, self.paths.database, "video")
 
-        for i, video_path in enumerate(dataset["filename"].iloc[:]):
+        for i, video_path in enumerate(dataset["filename"].iloc[:]): 
 
-            video = Video(video_path)
+            raw_video = Video(video_path=video_path)
 
-            if "FIBER_BROKEN" in video.name:        # for the rat 521
-                print("FIBER_BROKEN, skipped")
-                continue
+            output_dir = self.paths.raw / raw_video.file.subject / raw_video.name
+            output_dir.mkdir(parents=True, exist_ok=True)
 
-            print(f"\n[{i+1}/{len(dataset)}]")
-            print(f"Prediction of video: {video_path}\n")
-
-            # get clips lenght by looking at the month 
-            
-            meta = {"month": video.date.month}
+            meta = {"month": raw_video.date.month}
             clip_duration = u.match_rule(meta, self.clip_duration_rules)
 
-            # prediction 
+            print(f"\nSplitting video : {self.video.name}")
+            print(f"clip duration: {clip_duration}")
 
-            Prediction(video_obj=video,
-                        paths=self.paths,
-                        clip_duration=clip_duration)
+            if not output_dir.exists() : 
+                self.split_video(input_path= self.video.path, 
+                                output_dir= output_dir, 
+                                CLIP_DURATION= clip_duration)
+            else : 
+                print(f"Has already been splitted !")
 
-        print("Done!")
+        print("Done !")
+
 
 
     def build_metadata(self): 
         import joblib
 
-        dataset = data_filter.load_database(self.paths["raw_clips"], self.paths["database"], "video")
+        print(f"""
+        =============== Build Metadata ===============
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
 
-        output_dir = self.paths["metrics"]
+        dataset = data_filter.load_database(self.paths.raw, self.paths.database, "video")
+
+        output_dir = self.paths.trials_metadata
         output_dir.mkdir(parents=True, exist_ok=True)
 
         trials_by_group = {}
@@ -136,6 +140,37 @@ class Project(BaseProject):
         # d'essai par groupe
         # u.metadata_report(...)
 
+        print("Done!")
+
+
+
+
+    def run_prediction(self): 
+
+        print(f"""
+        ================= Prediction =================
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
+
+        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
+        
+        trialgroup = TrialGroup(joblib_filenames, self.conditions)
+
+        for i, trial in enumerate(trialgroup.trials):
+
+            if "FIBER_BROKEN" in trial.file.name:        # for the rat 521
+                print("FIBER_BROKEN, skipped")
+                continue
+
+            print(f"\n[{i+1}/{len(trialgroup.trials)}]")
+            print(f"Prediction of video: {trial.file.name}\n")
+
+            # prediction 
+            trial.dlc_predict(model_path=self.paths.model,
+                              output_csv_path=trial.file.path.parent / f"{trial.file.name}.csv")
+
+            break
 
         print("Done!")
             
@@ -156,6 +191,7 @@ class Project(BaseProject):
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
 
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
-        print(trialgroup.keep_val)
 
-        # self.path.results_root(trialgroup.keep_val)
+        analysis_output_path = self.paths.analysis(trialgroup.keep_val)
+        analysis_output_path.mkdir(parents=True, exist_ok=True)
+        print(analysis_output_path)
