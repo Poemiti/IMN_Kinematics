@@ -11,11 +11,19 @@ class Trial(BaseTrial):
         # from filename
         "name", "clip_path", "date", "camera_view", "clip_number",
         "laser_intensity", "handedness", "laser_type", "subject",
-        "condition", "session", "stim_location",
+        "condition", "session", "stim_location", "frame_width_cm", "cm_per_pixel",
+        "frame_width_px",
+
         # computed during build_metadata
-        "movement_type", "laser_state", "cue_type",
+        "movement_type", "laser_state", "cue_type", "lever_position",
         "time_pad_off", "time_laser_on", "time_reward", "group",
+        "task_success", "task_success_reason", 
+
+        # computed after prediction
+        "pred_path",
+
         # computed during preprocessing
+        "model_success", "traj", "coords",
     )
 
     def __init__(self, clip_path: str, yaml_path: str = None):
@@ -36,15 +44,26 @@ class Trial(BaseTrial):
         self.condition = self.file.condition
         self.session = self.file.session
         self.stim_location = self.file.stim_location
+        self.frame_width_px = self.file.frame_width_px
+        self.frame_width_cm = self.file.frame_width_cm
+        self.cm_per_pixel = self.file.cm_per_pixel
 
         # pipeline-computed fields, unknown at construction time
-        self.movement_type = None
-        self.laser_state = None
-        self.cue_type = None
+        # set after build_metadata
+        self.lever_position: tuple[int] = None
+        self.movement_type: str = None
+        self.laser_state: str = None
+        self.cue_type: str = None
         self.time_pad_off = None
         self.time_laser_on = None
         self.time_reward = None
         self.group = None
+
+        # set after prediction
+        self.pred_path: str = None
+        self.task_success: bool = None
+        self.task_success_reason: str = None
+
 
     def set_led_info(self, led_obj: Leds):
         self.update(
@@ -69,3 +88,26 @@ class Trial(BaseTrial):
             f"{self.laser_type}_{self.stim_location}_"
             f"{self.camera_view}View_{self.laser_intensity}_{self.laser_state}"
         ))
+
+
+    def set_task_success(self, laser_duration: int) : 
+        """Set if the rat did the correct task
+        A correct task is when the rat lift the paw associated with the task.
+        Unsuccessful is when the paw we're looking at has not been lift in time"""
+        if self.cue_type is None: 
+            self.update(task_success = False,
+                        task_success_reason = "no_cue_detected")
+
+        elif self.time_pad_off is None:
+            # print("  ! Pad off time is None")
+            self.update(task_success = False,
+                        task_success_reason = "no_pad_off")
+
+        elif self.time_laser_on is not None and self.time_laser_on + laser_duration > 3:
+            # print(f"  ! Laser window out of bounds (laser_on={time_laser_on})")
+            self.update(task_success = False,
+                        task_success_reason = "late_pad_off")
+
+        else : 
+            self.update(task_success = True,
+                        task_success_reason = "paw_lifted")
