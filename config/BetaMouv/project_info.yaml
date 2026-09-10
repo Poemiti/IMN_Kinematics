@@ -1,0 +1,5 @@
+# Hyperparameters (that don't change)
+
+bodypart: "finger_3"
+fps: 125
+laser_on_duration: 0.3  # sec 

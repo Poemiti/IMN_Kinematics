@@ -99,7 +99,7 @@ class View(tk.Tk):
 
     def show_image(self, path, index, total):
 
-        name = path.stem.replace("_interpolation", "")
+        name = path.stem.replace("interpolation_", "")
         img = Image.open(path)
         self.image = ImageTk.PhotoImage(img)
 
@@ -132,7 +132,7 @@ class View(tk.Tk):
 
 class Model:
     def __init__(self, trajfig_dir: Path):
-        self.paths = sorted(trajfig_dir.rglob("*_interpolation.png"))
+        self.paths = list(trajfig_dir.glob("interpolation_*.png"))
         self.validation = {}
 
     def get_path(self, i) -> Path:
@@ -140,7 +140,7 @@ class Model:
     
     def get_pathname(self, i):
         full_name = self.get_path(i)
-        return full_name.stem.replace("_interpolation", "")
+        return full_name.stem.replace("interpolation_", "")
 
     def __len__(self):
         return len(self.paths)

@@ -21,6 +21,14 @@ def match_rule(meta, rules):
 
 
 
+def make_path(base_dir, file_name) ->  Path:
+    base_dir.mkdir(parents=True, exist_ok=True)
+    return base_dir / file_name
+
+
+
+
+###################### decorator ###############################
 
 def process_time(func):
     @wraps(func)
