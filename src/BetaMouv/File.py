@@ -24,6 +24,10 @@ class File(BaseFile):
         self.session = trial_metadata["session"]
         self.laser_intensity = trial_metadata["laser_intensity"]
 
+        self.frame_width_px = 512
+        self.frame_width_cm = 8.7 if self.camera_view == "left" else 8.3
+        self.cm_per_pixel = self.frame_width_cm / self.frame_width_px
+
 
     def parse_filename(self) -> dict:
         import re
