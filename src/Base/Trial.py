@@ -1,51 +1,58 @@
 # src/Base/Trial.py
 
 
-from .File import File
 from pathlib import Path
 import yaml
 import pandas as pd
+from datetime import date, datetime
+
 
 class Trial:
-    # Subclasses extend this list with their own fields.
-    FIELDS: tuple = ()
+    FIELDS: tuple = ()          # everything — goes into joblib as-is
+    YAML_FIELDS: tuple = ()     # subset that gets written to the per-trial yaml
 
     def __init__(self, clip_path: str, yaml_path: str = None):
         self.clip_path = clip_path
         self.yaml_path = Path(yaml_path) if yaml_path else Path(clip_path).with_suffix(".yaml")
 
-
     def update(self, **kwargs):
-        """Generic setter for any declared field """
-
         for key, value in kwargs.items():
             if key not in self.FIELDS:
-                raise AttributeError(
-                    f"'{key}' is not a declared field of {type(self).__name__} "
-                    f"(check FIELDS or a typo)"
-                )
+                raise AttributeError(f"'{key}' is not a declared field of {type(self).__name__}")
             setattr(self, key, value)
-        return self  # allows chaining: trial.update(...).update(...)
-
-
-    def to_dict(self) -> dict:
-        return {field: getattr(self, field, None) for field in self.FIELDS}
-
-
-    def from_dict(self, data: dict):
-        for field in self.FIELDS:
-            if field in data:
-                setattr(self, field, data[field])
         return self
 
+    def to_dict(self) -> dict:
+        """Native objects, untouched — used for joblib (object identity preserved)."""
+        return {f: getattr(self, f, None) for f in self.FIELDS}
 
-    def save_yaml(self, path: str = None):
+    def from_dict(self, data: dict):
+        for f in self.FIELDS:
+            if f in data:
+                setattr(self, f, data[f])
+        return self
+
+    @staticmethod
+    def _serialize_value(value):
+        """Convert one value into something yaml.safe_dump can handle."""
+        if isinstance(value, (datetime, date)):
+            return value.isoformat()
+        if isinstance(value, Path):
+            return str(value)
+        if hasattr(value, "to_dict"):          # e.g. a Trajectory-like object
+            return value.to_dict()
+        return value
+
+    def to_yaml_dict(self) -> dict:
+        fields = self.YAML_FIELDS or self.FIELDS
+        return {f: self._serialize_value(getattr(self, f, None)) for f in fields}
+
+    def save_yaml(self, path=None):
         path = path or self.yaml_path
         with open(path, "w") as f:
-            yaml.safe_dump(self.to_dict(), f, sort_keys=False)
+            yaml.safe_dump(self.to_yaml_dict(), f, sort_keys=False)
 
-
-    def load_yaml(self, path: str = None):
+    def load_yaml(self, path=None):
         path = path or self.yaml_path
         with open(path, "r") as f:
             data = yaml.safe_load(f)

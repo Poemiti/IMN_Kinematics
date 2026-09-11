@@ -15,8 +15,11 @@ class TrialGroup:
         self.filenames = filenames
         self.condition = condition
 
+        self.keep_val = None
+
         self.trials: list[BaseTrial] = self._filter_joblib()
-        self.trials_df = pd.DataFrame([t.to_dict() for t in self.trials])
+
+
 
     def _filter_joblib(self) -> list[dict]:
         trials = []
@@ -25,10 +28,8 @@ class TrialGroup:
             if self._keep_file(filename):
                 print(f"Keep: {filename.name}")
 
-                records: list[dict] = joblib.load(filename)   # list of dicts now, not Trial objects
-                for record in records:
-                    trial = self.trial_cls(record["clip_path"]).from_dict(record)
-                    trials.append(trial)
+                records: list = joblib.load(filename)   # list of Trial objects
+                trials.extend(records)
             else:
                 print(f"Not Keep: {filename.name}")
 
@@ -38,9 +39,9 @@ class TrialGroup:
         name = filename.name
 
         for condition, criteria in self.condition.items():
-            keep_val = [value for value, keep in criteria.items() if keep]
+            self.keep_val = [value for value, keep in criteria.items() if keep]
 
-            if keep_val and not any(value in name for value in keep_val):
+            if self.keep_val and not any(value in name for value in self.keep_val):
                 return False
 
             not_keep_val = [value for value, keep in criteria.items() if not keep]
@@ -53,9 +54,12 @@ class TrialGroup:
     def save(self, output_dir: Path):
         by_group = {}
         for trial in self.trials:
-            by_group.setdefault(trial.group, []).append(trial.to_dict())
+            by_group.setdefault(trial.group, []).append(trial)
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         for group, records in by_group.items():
             joblib.dump(records, output_dir / f"{group}.joblib")
+
+
+

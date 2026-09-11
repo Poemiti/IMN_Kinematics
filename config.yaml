@@ -13,9 +13,10 @@ steps:  # ordered
   split_trials: false
   build_metadata: false
   run_prediction: false
-  preprocessing: true
-  compute_metrics: false
-  analysis: false
+  run_preprocessing: false
+  run_validation: true
+  compute_metrics: true
+  analysis: true
 
   # make_figures:
   #   single_subject: false

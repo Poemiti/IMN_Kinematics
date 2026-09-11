@@ -19,8 +19,14 @@ if cfg.build_metadata:
 if cfg.run_prediction:
     project.run_prediction()
 
-if cfg.preprocessing:
+if cfg.run_preprocessing:
     project.run_preprocessing()
+
+if cfg.run_validation:
+    project.run_validation()
+
+if cfg.compute_metrics:
+    project.compute_metrics()
 
 if cfg.analysis:
     project.run_analysis()

@@ -3,16 +3,25 @@
 from src.Base.Trial import Trial as BaseTrial
 from .Leds import Leds
 from .File import File
-
+from .Trajectory import Trajectory
+import pandas as pd
 
 class Trial(BaseTrial):
 
-    FIELDS = BaseTrial.FIELDS + (
-        # from filename
+    IDENTITY_FIELDS = (
         "name", "clip_path", "date", "camera_view", "clip_number",
         "laser_intensity", "handedness", "laser_type", "subject",
-        "condition", "session", "stim_location", "frame_width_cm", "cm_per_pixel",
-        "frame_width_px",
+        "condition", "session", "stim_location"
+    )
+
+    SCALAR_METRICS = (
+        "avg_velocity_laser_period", 
+        "tortuosity_laser_period", "tortuosity_pad_to_lever", 
+    )
+
+    FIELDS = BaseTrial.FIELDS + IDENTITY_FIELDS + SCALAR_METRICS + (
+        # from filename
+        "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
         # computed during build_metadata
         "movement_type", "laser_state", "cue_type", "lever_position",
@@ -23,8 +32,12 @@ class Trial(BaseTrial):
         "pred_path",
 
         # computed during preprocessing
-        "model_success", "traj", "coords",
+        "model_success", "model_success_reason", "traj", "coords"
     )
+
+
+    YAML_FIELDS = tuple(f for f in FIELDS if f not in ["traj", ])
+
 
     def __init__(self, clip_path: str, yaml_path: str = None):
         super().__init__(clip_path, yaml_path)
@@ -64,6 +77,25 @@ class Trial(BaseTrial):
         self.task_success: bool = None
         self.task_success_reason: str = None
 
+        # set after preprocessing + validation
+        self.coords: pd.Dataframe = None
+        self.model_success: bool = None
+        self.model_success_reason: str = None
+
+        self.traj: Trajectory = None
+
+    def identity(self) -> dict:
+        return {f: getattr(self, f, None) for f in self.IDENTITY_FIELDS}
+
+    def _is_successful(self): 
+
+        if self.task_success is None: 
+            raise ValueError(f"'Task success' not defined, must run 'build_metadata' first")
+        if self.model_success is None: 
+            raise ValueError(f"'Model success' not defined, must run 'validation' first")
+        
+        return self.task_success and self.model_success
+    
 
     def set_led_info(self, led_obj: Leds):
         self.update(

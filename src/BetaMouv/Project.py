@@ -12,7 +12,7 @@ from .Trajectory import Trajectory
 
 
 from pathlib import Path
-import yaml, time
+import yaml, time, joblib
 from src.utils import process_time
 
 import src.utils as u
@@ -82,7 +82,6 @@ class Project(BaseProject):
 
     @process_time
     def build_metadata(self): 
-        import joblib
 
         print(f"""
         =============== Build Metadata ===============
@@ -145,7 +144,7 @@ class Project(BaseProject):
             trial.save_yaml()
 
             # Add trial to its group
-            trials_by_group.setdefault(trial.group, []).append(trial.to_dict())
+            trials_by_group.setdefault(trial.group, []).append(trial)
 
         # Save one big joblib per group
         print("\nTrials saved as joblibs: ")
@@ -198,162 +197,127 @@ class Project(BaseProject):
             
             
     @process_time  
-    def run_preprocessing(self): 
+    def run_preprocessing(self):
+
         print(f"""
-        ============= Run Preprocessing ==============
+        =============== Preprocessing =================
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
-
-        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
-
-        trialgroup = TrialGroup(joblib_filenames, self.conditions)
-
+        
         preprocess_dir = self.paths.results_root / "preprocess"
 
-        if  any(preprocess_dir.iterdir()): 
+        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
+        trialgroup = TrialGroup(joblib_filenames, self.conditions)
 
-            for i, trial in enumerate(trialgroup.trials):
+        for trial in trialgroup.trials:
 
-                print("\n", trial.name)
-
-                # construct a traj object
-                traj = Trajectory(coords_path=trial.pred_path, 
-                                view=trial.camera_view,
-                                bodypart="finger_3",
-                                cm_per_pixel=trial.cm_per_pixel, 
-                                lever_position=trial.lever_position)
-
-                # do some filtration + launch validation gui
-                likelihood_thresh = 0.7
-
-                trial.set_task_success(self.project_info["laser_on_duration"])
-                print(trial.task_success_reason, trial.time_pad_off)
-                if not trial.task_success: 
-                    print("TASK NOT SUCCESSFUL:", trial.task_success_reason)
-                    continue
-
-                outlier_filtered_coords, params = traj.filter_outliers(traj.raw_coords, stat_method='eucli')
-                likelihood_filtered_coords, likelihood_threshold = traj.filter_likelihood(outlier_filtered_coords, likelihood_thresh)
-                traj.interpolated_coords = traj.interpolate_data(likelihood_filtered_coords, method="spline", max_gap=5)
-
-                # make figures that will be used for the validation
-                interpolation_path = u.make_path(preprocess_dir, f"interpolation_{trial.name}png")
-                traj.make_interpolation_figures(interpolated_coords=traj.interpolated_coords, 
-                                                likelihood_filtered_coords=likelihood_filtered_coords,
-                                                outlier_filtered_coords=outlier_filtered_coords,
-                                                raw_coords=traj.coords,
-                                                time_pad_off=trial.time_pad_off,
-                                                title=f"{trial.group} - {trial.camera_view} view", 
-                                                save_as=interpolation_path)
-
-
-                # save traj info (before validation)
-                trial.update( 
-                        model_success = None,
-                        traj = traj
-                )
-
-        # launch validation
-
-        trial_states: list[str] = Validator.load_preprocess_validator(preprocess_dir)
-
-        for trial, state in zip(trialgroup.trials, trial_states): 
-
-            if not trial.task_success or not state:  # pass when the validation has been stop in the middle
+            if not trial.task_success:
                 continue
 
-            elif state == "rejected" : 
-                trial.update(model_success = False) 
+            traj = Trajectory(
+                coords_path=trial.pred_path,
+                view=trial.camera_view,
+                cm_per_pixel=trial.cm_per_pixel, 
+                lever_position=trial.lever_position,
+            )
 
-            elif state == "raw" : 
-                trial.update(model_success = True,
-                             coords = trial.traj.coords)
+            raw_coords = traj.coords
+            outlier_filtered, _ = traj.filter_outliers(raw_coords, stat_method="eucli")
+            likelihood_filtered, _ = traj.filter_likelihood(outlier_filtered, 0.7)
+            interpolated = traj.interpolate_data(likelihood_filtered, method="spline", max_gap=5)
 
-            else : 
-                trial.update(model_success = True, 
-                             coords = trial.traj.interpolated_coords)
+            traj.make_interpolation_figures(
+                interpolated_coords=interpolated,
+                likelihood_filtered_coords=likelihood_filtered,
+                outlier_filtered_coords=outlier_filtered,
+                raw_coords=raw_coords,
+                time_pad_off=trial.time_pad_off,
+                title=f"{trial.name}",
+                save_as=preprocess_dir / f"interpolation_{trial.name}.png",
+            )
+
+            trial.update(traj=traj)
 
         trialgroup.save(self.paths.trials_metadata)
 
+
+    @process_time
+    def run_validation(self):
+        preprocess_dir = self.paths.results_root / "preprocess"
+        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
+        trialgroup = TrialGroup(joblib_filenames, self.conditions)
+
+        trial_states = Validator.load_preprocess_validator(preprocess_dir)
+
+        n_total = len(trialgroup.trials)
+        n_updated = 0
+        n_skipped_no_success = 0
+        n_skipped_no_state = 0
+
+        for trial in trialgroup.trials:
+            state = trial_states.get(trial.name)
+
+            if not trial.task_success:
+                n_skipped_no_success += 1
+                trial.update(model_success=False, 
+                             model_success_reason="Task failed, skipped")
+
+                continue
+            if not state:
+                n_skipped_no_state += 1
+                continue
+
+            if state == "rejected":
+                trial.update(model_success=False, 
+                             model_success_reason="Manually rejected")
+            elif state == "raw":
+                trial.update(model_success=True, 
+                             model_success_reason="Raw coordinates", 
+                             coords=trial.traj.coords)
+            else:
+                trial.update(model_success=True, 
+                             model_success_reason="Interpolated coordinates",
+                            coords=trial.traj.interpolated_coords)
+            n_updated += 1
+
+        print(f"\nValidation summary: {n_updated}/{n_total} trials updated "
+            f"({n_skipped_no_success} skipped: task not successful, "
+            f"{n_skipped_no_state} skipped: no validation state found)\n")
+
+        if n_updated == 0:
+            raise RuntimeError(
+                "run_validation updated 0 trials — check that Validator.load_preprocess_validator "
+                "is reading the right file and that its keys match trial.name."
+            )
+
+        trialgroup.save(self.paths.trials_metadata)
+
+    @process_time 
+    def compute_metrics(self): 
+        print(f"""
+        =============== Compute Metrics =================
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
         
+        preprocess_dir = self.paths.results_root / "preprocess"
 
-## TODO
-# review this code: 
-    # def run_preprocessing_compute(self):
-    #     preprocess_dir = self.paths.results_root / "preprocess"
-    #     cache_dir = preprocess_dir / "cache"
-    #     cache_dir.mkdir(parents=True, exist_ok=True)
+        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
+        trialgroup = TrialGroup(joblib_filenames, self.conditions)
 
-    #     joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
-    #     trialgroup = TrialGroup(joblib_filenames, self.conditions)
+        for trial in trialgroup.trials:
+            if not trial._is_successful():    
+                continue
 
-    #     for trial in trialgroup.trials:
-    #         cache_path = cache_dir / f"{trial.name}.joblib"
-    #         if cache_path.exists():
-    #             continue   # already computed, skip — makes this step resumable
+            coords = trial.traj.compute_instant_metrics(trial.coords)
 
-    #         trial.set_task_success(self.project_info["laser_on_duration"])
-    #         if not trial.task_success:
-    #             continue
+            ## TODO
+            # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
+             
+            trial.update(coords=coords)
 
-    #         traj = Trajectory(
-    #             coords_path=trial.prediction_csv_path,
-    #             view=trial.camera_view,
-    #             cm_per_pixel=self.camera_calibration[trial.camera_view],  # project config, not per-trial
-    #             lever_position=self.lever_positions[trial.camera_view],
-    #         )
-
-    #         outlier_filtered, _ = traj.filter_outliers(traj.coords, stat_method="eucli")
-    #         likelihood_filtered, _ = traj.filter_likelihood(outlier_filtered, 0.7)
-    #         interpolated = traj.interpolate_data(likelihood_filtered, method="spline", max_gap=5)
-
-    #         traj.make_interpolation_figures(
-    #             interpolated_coords=interpolated,
-    #             likelihood_filtered_coords=likelihood_filtered,
-    #             outlier_filtered_coords=outlier_filtered,
-    #             raw_coords=traj.raw_coords,
-    #             time_pad_off=trial.time_pad_off,
-    #             title=f"{trial.group} - {trial.camera_view} view",
-    #             save_as=preprocess_dir / f"interpolation_{trial.name}.png",
-    #         )
-
-    #         joblib.dump({
-    #             "raw": traj.raw_coords,
-    #             "outlier_filtered": outlier_filtered,
-    #             "likelihood_filtered": likelihood_filtered,
-    #             "interpolated": interpolated,
-    #         }, cache_path)
-
-
-    # def run_preprocessing_finalize(self):
-    # preprocess_dir = self.paths.results_root / "preprocess"
-    # cache_dir = preprocess_dir / "cache"
-
-    # joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
-    # trialgroup = TrialGroup(joblib_filenames, self.conditions)
-
-    # trial_states = Validator.load_preprocess_validator(preprocess_dir)
-
-    # for trial in trialgroup.trials:
-    #     state = trial_states.get(trial.name)
-    #     cache_path = cache_dir / f"{trial.name}.joblib"
-
-    #     if not trial.task_success or not state or not cache_path.exists():
-    #         continue
-
-    #     if state == "rejected":
-    #         trial.update(model_success=False)
-    #         continue
-
-    #     candidates = joblib.load(cache_path)
-    #     coords = candidates["raw"] if state == "raw" else candidates["interpolated"]
-
-    #     metrics = compute_metrics(coords, fps=125)  # velocity, tortuosity, etc. — plain function or Trajectory.compute_metrics
-
-    #     trial.update(model_success=True, coords=coords, **metrics)
-
-    # trialgroup.save(self.paths.trials_metadata)
+        trialgroup.save(self.paths.trials_metadata)
 
 
 
@@ -362,11 +326,17 @@ class Project(BaseProject):
 
 
     def run_analysis(self): 
-
+        print(f"""
+        =============== Analysis =================
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
+        
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
 
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
+        analysis_dir = self.paths.analysis(trialgroup.keep_val)
 
-        analysis_output_path = self.paths.analysis(trialgroup.keep_val)
-        analysis_output_path.mkdir(parents=True, exist_ok=True)
-        print(analysis_output_path)
+        trialgroup.plot_instant_velocity()
+
+        

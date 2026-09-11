@@ -73,7 +73,9 @@ class Config:
         self.split_trials = steps["split_trials"]
         self.run_prediction = steps["run_prediction"]
         self.build_metadata = steps["build_metadata"]
-        self.preprocessing = steps["preprocessing"]
+        self.run_preprocessing = steps["run_preprocessing"]
+        self.run_validation = steps["run_validation"]
+        self.compute_metrics = steps["compute_metrics"]
         self.analysis = steps["analysis"]
 
     def load_project(self) -> object:

@@ -38,7 +38,7 @@ def process_time(func):
         result = func(self, *args, **kwargs)
         elapsed = time.perf_counter() - start
 
-        print(f"[{func.__name__}] Processing time: {_format_duration(elapsed)}")
+        print(f"\n[{func.__name__}] time: {_format_duration(elapsed)}")
 
         return result
     return wrapper

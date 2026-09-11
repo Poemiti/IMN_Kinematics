@@ -7,6 +7,14 @@ import pandas as pd
 import numpy as np
 from scipy.interpolate import make_splrep, splev
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+
+
+custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
+
 
 class Trajectory(BaseTrajectory): 
 
@@ -129,9 +137,9 @@ class Trajectory(BaseTrajectory):
             dists = np.sqrt((diffs**2).sum(axis=1))
 
             # remove consecutive outliers
-            mask = dists < threshold
-            mask = self._remove_consecutiv_outliers(mask, max_len=3)
-            mask = ~mask
+            is_outlier = dists >= threshold
+            is_outlier = self._remove_consecutiv_outliers(is_outlier, max_len=3)
+            mask = is_outlier   
 
             params = (dists, threshold, mask)
 
@@ -139,6 +147,7 @@ class Trajectory(BaseTrajectory):
             raise ValueError(f"Unknown stat_method '{stat_method}'")
         
         filtered_coords.loc[mask, ["x", "y"]] = np.nan
+
         return filtered_coords, params
 
 
@@ -217,6 +226,8 @@ class Trajectory(BaseTrajectory):
         return coords_interpolated
 
 
+    ####################### plotting methods ########################
+
     def make_interpolation_figures(self, 
                                     interpolated_coords, 
                                     likelihood_filtered_coords,
@@ -225,16 +236,11 @@ class Trajectory(BaseTrajectory):
                                     time_pad_off,
                                     title, 
                                     save_as):
-        import matplotlib.pyplot as plt
 
-        self.show_traj(raw_coords)
-        
         def _plot_traj(coord, offset, label, color, ax: plt.axes = None, marker: str = None):
 
             x = coord["x"] - offset
             y = coord["y"] - offset
-
-            print(x)
 
             if ax is not None : 
                 ax.plot(x, y, label=label, color=color)
@@ -261,10 +267,10 @@ class Trajectory(BaseTrajectory):
 
 
 
-        fig = plt.figure(figsize=(10,6))
+        fig = plt.figure(figsize=(12,6))
         gs = fig.add_gridspec(2, 2)
 
-        offset = 20 # pixel
+        offset = 0.2  # cm
 
         ax_xt = fig.add_subplot(gs[0,0])      # x(t)
         ax_yt = fig.add_subplot(gs[1,0])      # y(t)
@@ -279,32 +285,33 @@ class Trajectory(BaseTrajectory):
         pad_off_frame = pad_off_frame if pad_off_frame >=0 else 0
         off_frame = int((time_pad_off + 0.4) * 125)
         
-        _plot_traj(raw_coords[pad_off_frame : off_frame], 0*offset, "raw", "#d1cbdc", ax_traj)
-        _plot_traj(outlier_filtered_coords[pad_off_frame : off_frame], 0*offset, "outlier", "#bdc9e1" ,ax_traj, "")
-        _plot_traj(likelihood_filtered_coords[pad_off_frame : off_frame], 0*offset, "likelihood", "#74a9cf" ,ax_traj, "")
-        _plot_traj(interpolated_coords[pad_off_frame : off_frame], 0*offset, "interpolate", "#0570b0" ,ax_traj, "|")
+        _plot_traj(raw_coords[pad_off_frame : off_frame], 0*offset, "1.raw", "#d1cbdc", ax_traj)
+        _plot_traj(outlier_filtered_coords[pad_off_frame : off_frame], 0*offset, "2.outlier", "#bdc9e1" ,ax_traj, "")
+        _plot_traj(likelihood_filtered_coords[pad_off_frame : off_frame], 0*offset, "3.likelihood", "#74a9cf" ,ax_traj, "")
+        _plot_traj(interpolated_coords[pad_off_frame : off_frame], 0*offset, "4.interpolate", "#0570b0" ,ax_traj, "|")
 
+        ax_xt.set(
+            ylabel=("x (cm)"),
+            xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
+            )
 
-        ax_xt.set_ylabel("x")
-        ax_xt.set_xlim(time_pad_off - 0.1, time_pad_off + 0.4)
-        ax_xt.set_title(title)
+        ax_yt.set(
+            ylabel=("y (cm)"),
+            xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
+            xlabel=("time (s)"),
+            )
+        ax_yt.invert_yaxis()
 
-        ax_yt.set_ylabel("y")
-        ax_yt.set_xlim(time_pad_off - 0.1, time_pad_off + 0.4)
-        ax_yt.set_xlabel("time (s)")
-
-        ax_traj.set_title("Trajectory comparaison between\nraw and final interpolated")
-        ax_traj.set_xlabel("x")
-        ax_traj.set_ylabel("y")
+        ax_traj.set(
+            xlabel=("x (cm)"),
+            ylabel=("y (cm)"),
+            xlim=(0, self.frame_height * self.cm_per_pixel),
+            ylim=(0, self.frame_height * self.cm_per_pixel)
+            )
         ax_traj.legend()
-        # ax_traj.set_aspect("equal")
-        
 
-        for ax in [ax_xt, ax_yt]:
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-        ax_yt.set_xticks([time_pad_off - 0.1, time_pad_off + 0.4])
+        title = title[:len(title)//2] + "\n" + title[len(title)//2:]
+        fig.suptitle(title, wrap=True)
 
         plt.tight_layout()
         fig.savefig(save_as)
