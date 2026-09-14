@@ -22,11 +22,23 @@ class File(BaseFile):
         self.stim_location = trial_metadata["stim_location"]
         self.handedness = trial_metadata["handedness"]
         self.session = trial_metadata["session"]
-        self.laser_intensity = trial_metadata["laser_intensity"]
+
+        self.laser_intensity = self._set_laser_intensity(trial_metadata["laser_intensity"])
 
         self.frame_width_px = 512
         self.frame_width_cm = 8.7 if self.camera_view == "left" else 8.3
         self.cm_per_pixel = self.frame_width_cm / self.frame_width_px
+
+
+    def _set_laser_intensity(self, intensity) -> str: 
+        if (self.laser_type == "Beta" and intensity == "1mW" )or \
+            (self.laser_type == "Conti" and intensity == "0,5mW"): 
+            return "low"
+        elif (self.laser_type == "Beta" and intensity == "2,5mW") or \
+            (self.laser_type == "Conti" and intensity == "0,75mW"): 
+            return "high"
+        else: 
+            return "incompatible"
 
 
     def parse_filename(self) -> dict:

@@ -14,8 +14,8 @@ steps:  # ordered
   build_metadata: false
   run_prediction: false
   run_preprocessing: false
-  run_validation: true
-  compute_metrics: true
+  run_validation: false
+  compute_metrics: false
   analysis: true
 
   # make_figures:

@@ -293,6 +293,8 @@ class Project(BaseProject):
 
         trialgroup.save(self.paths.trials_metadata)
 
+
+
     @process_time 
     def compute_metrics(self): 
         print(f"""
@@ -331,12 +333,19 @@ class Project(BaseProject):
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
+
+        import seaborn as sns
+        import matplotlib.pyplot as plt
         
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
 
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
         analysis_dir = self.paths.analysis(trialgroup.keep_val)
 
-        trialgroup.plot_instant_velocity()
-
+        trialgroup.plot_tendency(
+            value="instant_velocity",
+            save_as=u.make_path(analysis_dir / "tendency", "instant_velocity.svg")
+        )
+        
+        
         

@@ -11,7 +11,10 @@ class Trial(BaseTrial):
     IDENTITY_FIELDS = (
         "name", "clip_path", "date", "camera_view", "clip_number",
         "laser_intensity", "handedness", "laser_type", "subject",
-        "condition", "session", "stim_location"
+        "condition", "session", "stim_location", "laser_state", 
+        "movement_type", "cue_type",
+        "time_pad_off", "time_laser_on", "time_reward", "group",
+        "task_success", "task_success_reason",
     )
 
     SCALAR_METRICS = (
@@ -23,13 +26,8 @@ class Trial(BaseTrial):
         # from filename
         "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
-        # computed during build_metadata
-        "movement_type", "laser_state", "cue_type", "lever_position",
-        "time_pad_off", "time_laser_on", "time_reward", "group",
-        "task_success", "task_success_reason", 
-
         # computed after prediction
-        "pred_path",
+        "pred_path", "lever_position",
 
         # computed during preprocessing
         "model_success", "model_success_reason", "traj", "coords"

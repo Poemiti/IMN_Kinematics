@@ -27,7 +27,7 @@ class Trial:
         return {f: getattr(self, f, None) for f in self.FIELDS}
 
     def from_dict(self, data: dict):
-        for f in self.FIELDS:
+        for f in self.YAML_FIELDS:
             if f in data:
                 setattr(self, f, data[f])
         return self
