@@ -10,13 +10,13 @@ config_log: None
 # Boolean only
 
 steps:  # ordered
-  split_trials: false
-  build_metadata: false
-  run_prediction: false
-  run_preprocessing: false
-  run_validation: false
-  compute_metrics: false
-  analysis: true
+  split_trials: 
+  build_metadata: 
+  run_prediction: 
+  run_preprocessing: t
+  run_validation: 
+  compute_metrics: 
+  analysis: 
 
   # make_figures:
   #   single_subject: false

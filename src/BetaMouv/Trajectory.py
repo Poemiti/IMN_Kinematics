@@ -3,6 +3,8 @@
 
 from src.Base.Trajectory import Trajectory as BaseTrajectory
 from .File import File
+from .BehaviorBox import BehaviorBox
+
 import pandas as pd
 import numpy as np
 from scipy.interpolate import make_splrep, splev
@@ -23,33 +25,6 @@ class Trajectory(BaseTrajectory):
 
     ################## Trajectory filtration method ###############
     # specific to this project
-
-    @staticmethod
-    def _remove_consecutiv_outliers(mask, max_len=2):
-        clean_mask = mask.copy()
-        mask_size = len(mask)
-
-        i = 0
-        while i < mask_size:
-            if clean_mask[i]:
-                start = i
-
-                while i < mask_size and clean_mask[i]:
-                    i += 1
-
-                end = i
-                length = end - start
-
-                left_bad = start > 0 and not clean_mask[start-1]
-                right_bad = end < mask_size and not clean_mask[end]
-
-                if left_bad and right_bad and length <= max_len:
-                    clean_mask[start:end] = False
-            else:
-                i += 1
-
-        return clean_mask
-
 
 
     @staticmethod
@@ -87,7 +62,33 @@ class Trajectory(BaseTrajectory):
         
         return filtered_coords, computed_thresh
 
+    @staticmethod
+    def _remove_consecutiv_outliers(mask, max_len=2):
+        """True = outlier detected"""
+        clean_mask = mask.copy()
+        mask_size = len(mask)
 
+        i = 0
+        while i < mask_size:
+            if clean_mask[i]:
+                start = i
+
+                while i < mask_size and clean_mask[i]:
+                    i += 1
+
+                end = i
+                length = end - start
+
+                left_bad = start > 0 and not clean_mask[start-1]
+                right_bad = end < mask_size and not clean_mask[end]
+
+                if left_bad and right_bad and length <= max_len:
+                    clean_mask[start:end] = True
+            else:
+                i += 1
+
+        return clean_mask
+    
 
     def filter_outliers(self, coords: pd.DataFrame, stat_method: str = 'mad') -> pd.DataFrame : 
         """
@@ -130,7 +131,7 @@ class Trajectory(BaseTrajectory):
 
 
         if stat_method == "eucli" : 
-            threshold = 40 # pixel
+            threshold = 0.55  # cm
 
             # compute displacement
             diffs = coords[["x","y"]].diff()
@@ -152,7 +153,7 @@ class Trajectory(BaseTrajectory):
 
 
 
-    def interpolate_data(self, coords: pd.DataFrame, method: str, max_gap: int, displacement_threshold: float | None = None) -> pd.DataFrame:
+    def interpolate_data(self, coords: pd.DataFrame, method: str, max_gap: int) -> pd.DataFrame:
         """
         Interpolates missing values (NaN) in coordinates dataframe.
         Only for a number of consecutive missing values under max_gap
@@ -212,16 +213,6 @@ class Trajectory(BaseTrajectory):
             # print(f"Number of NaNs before interpolation : {before_nans}, after : {after_nans}")
 
             coords_interpolated[col] = interp_series
-
-        # Revert large displacements to NaN if threshold is set
-        if displacement_threshold is not None:
-            dx = coords_interpolated["x"].diff()
-            dy = coords_interpolated["y"].diff()
-            displacement = (dx ** 2 + dy ** 2) ** 0.5
-            exceed = displacement > displacement_threshold
-            coords_interpolated.loc[exceed, "x"] = float('nan')
-            coords_interpolated.loc[exceed, "y"] = float('nan')
-            print(f"{exceed.sum()} frames exceeded displacement threshold and were reverted to NaN")
 
         return coords_interpolated
 

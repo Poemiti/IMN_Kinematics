@@ -4,6 +4,8 @@ from src.Base.Trial import Trial as BaseTrial
 from .Leds import Leds
 from .File import File
 from .Trajectory import Trajectory
+from.BehaviorBox import BehaviorBox
+
 import pandas as pd
 
 class Trial(BaseTrial):
@@ -26,15 +28,13 @@ class Trial(BaseTrial):
         # from filename
         "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
-        # computed after prediction
-        "pred_path", "lever_position",
-
-        # computed during preprocessing
+        # computed after prediction and metadata_building
+        "pred_path", "lever_position", "behaviorBox",
         "model_success", "model_success_reason", "traj", "coords"
     )
 
 
-    YAML_FIELDS = tuple(f for f in FIELDS if f not in ["traj", ])
+    YAML_FIELDS = tuple(f for f in FIELDS if f not in ["traj", "behaviorBox"])
 
 
     def __init__(self, clip_path: str, yaml_path: str = None):
@@ -44,8 +44,8 @@ class Trial(BaseTrial):
 
         # identity fields, filled immediately from the parsed filename
         self.name = self.file.name
-        self.clip_path = str(self.file.path)
-        self.date = self.file.date.isoformat()
+        self.clip_path = self.file.path
+        self.date = self.file.date
         self.camera_view = self.file.camera_view
         self.clip_number = self.file.clip_number
         self.laser_intensity = self.file.laser_intensity
@@ -65,10 +65,11 @@ class Trial(BaseTrial):
         self.movement_type: str = None
         self.laser_state: str = None
         self.cue_type: str = None
-        self.time_pad_off = None
-        self.time_laser_on = None
-        self.time_reward = None
-        self.group = None
+        self.time_pad_off: float = None
+        self.time_laser_on: float = None
+        self.time_reward: float = None
+        self.group: str = None
+        self.behaviorBox: BehaviorBox = None
 
         # set after prediction
         self.pred_path: str = None

@@ -8,12 +8,18 @@ from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
 from .Trajectory import Trajectory
+from .BehaviorBox import BehaviorBox
 
 
 
 from pathlib import Path
 import yaml, time, joblib
 from src.utils import process_time
+from tqdm import tqdm
+
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 import src.utils as u
 import src.BetaMouv.gui.database_filter as Data_filter
@@ -93,11 +99,9 @@ class Project(BaseProject):
 
         trials_by_group = {}
 
-        for i, clip_path in enumerate(dataset["filename"].iloc[:]):
+        for clip_path in tqdm(dataset["filename"].iloc[:], desc="building metadata"):
 
             trial = Trial(clip_path=clip_path)
-
-            print(f"Building metadata of: {trial.name}")
 
             # get annotation number
             annotation_meta = {
@@ -107,17 +111,13 @@ class Project(BaseProject):
             }
             label_studio_annotation = u.match_rule(annotation_meta, self.annotation_rules)
 
-            print(f"label studio annotation: {label_studio_annotation}")
-            print(f"annotation meta: {annotation_meta}")
-
             # get Leds info to tell the Laser state (LaserOn, LaserOff)
             leds = Leds(video_path=clip_path, 
-                        label_studio_annotation=label_studio_annotation,
-                        )
+                        label_studio_annotation=label_studio_annotation,)
 
             if (trial.camera_view == "left" and leds.cue_type == "CueL2") or \
                (trial.camera_view == "right" and leds.cue_type == "CueL1") : 
-                print(f"Camera: {trial.camera_view} | cue: {leds.cue_type} ! Not compatible\n")
+                # print(f"Camera: {trial.camera_view} | cue: {leds.cue_type} ! Not compatible\n")
                 continue
 
             # get lever_position
@@ -130,7 +130,13 @@ class Project(BaseProject):
             }
 
             anchors_position = u.match_rule(etho_meta, self.ethology_rules)
-            trial.update(lever_position=anchors_position["lever"])
+            Boxes = BehaviorBox(xy_lever=anchors_position["lever"],
+                            xy_pad=anchors_position["pad"],
+                            view=trial.camera_view,
+                            frame_width=trial.frame_width_px)
+
+            trial.update(behaviorBox=Boxes,
+                        lever_position=anchors_position["lever"])
 
             trial.set_led_info(leds)
             trial.set_task_success(self.project_info["laser_on_duration"])
@@ -154,7 +160,7 @@ class Project(BaseProject):
             print(f"  {group}: {len(trials)}")
 
 
-        print("\nVisualisation of the proportion of each experimental condition\n")
+        # print("\nVisualisation of the proportion of each experimental condition\n")
 
         # TODO
         # refaire la fonction de metadata report pour afficher le nombre
@@ -178,14 +184,14 @@ class Project(BaseProject):
         
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
 
-        for i, trial in enumerate(trialgroup.trials):
+        for trial in tqdm(trialgroup.trials, desc="Prediction"):
+            if not trial._is_successful(): 
+                continue
 
             if "FIBER_BROKEN" in trial.name:        # for the rat 521
                 print("FIBER_BROKEN, skipped")
                 continue
 
-            print(f"\n[{i+1}/{len(trialgroup.trials)}]")
-            print(f"Prediction of video: {trial.name}\n")
 
             # prediction 
             trial.dlc_predict(model_path=self.paths.model,
@@ -210,10 +216,15 @@ class Project(BaseProject):
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
 
-        for trial in trialgroup.trials:
+        dist = pd.DataFrame()
+
+        for trial in tqdm(trialgroup.trials, desc="Preprocessing"):
 
             if not trial.task_success:
                 continue
+
+            # if trial.name != "Rat_#517Ambidexter_20240621_Session2_ContiMT300_0,5mW_Laser3070_RightHemiCHR_L1L25050_C001H001S0001_clip_40": 
+            #     continue
 
             traj = Trajectory(
                 coords_path=trial.pred_path,
@@ -223,7 +234,7 @@ class Project(BaseProject):
             )
 
             raw_coords = traj.coords
-            outlier_filtered, _ = traj.filter_outliers(raw_coords, stat_method="eucli")
+            outlier_filtered, params = traj.filter_outliers(raw_coords, stat_method="eucli")
             likelihood_filtered, _ = traj.filter_likelihood(outlier_filtered, 0.7)
             interpolated = traj.interpolate_data(likelihood_filtered, method="spline", max_gap=5)
 
@@ -244,6 +255,12 @@ class Project(BaseProject):
 
     @process_time
     def run_validation(self):
+        print(f"""
+        ================= Validation =================
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
+        
         preprocess_dir = self.paths.results_root / "preprocess"
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
@@ -255,7 +272,7 @@ class Project(BaseProject):
         n_skipped_no_success = 0
         n_skipped_no_state = 0
 
-        for trial in trialgroup.trials:
+        for trial in tqdm(trialgroup.trials, desc="Saving validation"):
             state = trial_states.get(trial.name)
 
             if not trial.task_success:
@@ -281,9 +298,9 @@ class Project(BaseProject):
                             coords=trial.traj.interpolated_coords)
             n_updated += 1
 
-        print(f"\nValidation summary: {n_updated}/{n_total} trials updated "
-            f"({n_skipped_no_success} skipped: task not successful, "
-            f"{n_skipped_no_state} skipped: no validation state found)\n")
+        print(f"\nValidation summary: {n_updated}/{n_total} trials updated\n"
+            f"{n_skipped_no_success} : task not successful, "
+            f"{n_skipped_no_state} : no validation state found)\n")
 
         if n_updated == 0:
             raise RuntimeError(
@@ -298,7 +315,7 @@ class Project(BaseProject):
     @process_time 
     def compute_metrics(self): 
         print(f"""
-        =============== Compute Metrics =================
+        ============== Compute Metrics ===============
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
@@ -308,12 +325,12 @@ class Project(BaseProject):
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
 
-        for trial in trialgroup.trials:
+        for trial in tqdm(trialgroup.trials, desc="Computing metrics"):
             if not trial._is_successful():    
                 continue
 
             coords = trial.traj.compute_instant_metrics(trial.coords)
-
+            coords = trial.behaviorBox.classify_trajectory(coords)
             ## TODO
             # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
              

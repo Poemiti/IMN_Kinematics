@@ -6,12 +6,7 @@ from pathlib import Path
 import numpy as np
 
 import matplotlib.pyplot as plt
-import seaborn as sns
 
-
-
-custom_params = {"axes.spines.right": False, "axes.spines.top": False}
-sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
 
 
 class Trajectory: 
@@ -107,13 +102,8 @@ class Trajectory:
 
         fig, ax = plt.subplots(figsize=(8, 6))
 
-        sns.lineplot(
-            data=coords,
-            x="x", y="y",
-            ax=ax,
-            linewidth=0.5, color="gray",
-            sort=False
-        )
+        ax.plot(coords["x"], coords["y"], color="lightblue")
+        ax.scatter(coords["x"], coords["y"], marker="|", )
 
         # sns.scatterplot(
         #     data=coords,
@@ -123,11 +113,13 @@ class Trajectory:
         #     linewidth=0,
         #     hue="instant_velocity"
         # )
+        name = self.file.name.replace("pred_results_", "")
+        title = name[:len(name)//2] + "\n" + name[len(name)//2:]
 
         ax.set(
-            xlim=(0, self.frame_height * self.cm_per_pixel),
-            ylim=(0, self.frame_height * self.cm_per_pixel),
-            title=self.file.name,
+            # xlim=(0, self.frame_height * self.cm_per_pixel),
+            # ylim=(0, self.frame_height * self.cm_per_pixel),
+            title=title,
             xlabel="X position (cm)",
             ylabel="Y position (cm)",
         )

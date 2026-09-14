@@ -15,7 +15,7 @@ class File(BaseFile):
 
         self.date = datetime.strptime(trial_metadata["date"], "%Y%m%d").date()
         self.camera_view = "left" if trial_metadata["camera_view"] == "H001" else "right"
-        self.clip_number = trial_metadata["clip"]
+        self.clip_number = int(trial_metadata["clip"])
         self.subject = trial_metadata["subject"]
         self.condition = trial_metadata["condition"]
         self.laser_type = trial_metadata["laser_type"]
