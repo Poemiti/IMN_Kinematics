@@ -12,6 +12,7 @@ class Video:
 
         self.file = self.file_cls(video_path)
         self.is_openable = True
+        self.is_readable = True
 
         cap = cv2.VideoCapture(str(video_path))
 
@@ -26,6 +27,10 @@ class Video:
         self.frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        if self.frame_count < 10: 
+            self.is_readable = False
+            print(f"[ERROR] {video_path}: is too short ({self.frame_count} frames)")
 
         cap.release()
 

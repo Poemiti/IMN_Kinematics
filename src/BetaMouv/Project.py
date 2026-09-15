@@ -13,7 +13,7 @@ from .BehaviorBox import BehaviorBox
 
 
 from pathlib import Path
-import yaml, time, joblib
+import yaml, time, joblib, sys
 from src.utils import process_time
 from tqdm import tqdm
 
@@ -85,21 +85,52 @@ class Project(BaseProject):
 
         
 
-
-    @process_time
     def build_metadata(self): 
-
         print(f"""
         =============== Build Metadata ===============
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
 
+        joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
+        print(f"{len(joblib_filenames)} joblib metadata files ({self.paths.trials_metadata})")
+        res = input("Overwrite those metadata ? (y/n/q) : ")
+
+        if res == "y" or res == "": 
+            print("\nOVEWRITING METADATA\n")
+            return self.init_metadata()
+
+        elif res == "n" : 
+            print("\nUPDATING METADATA\n")
+            return self.update_metadata()
+
+        elif res == "q" : 
+                    print("\nQuit !\n")
+                    sys.exit()
+
+        else : 
+            raise ValueError(f"'{res}' is not valid, must be 'y' or 'n'")
+         
+
+
+    @process_time
+    def init_metadata(self): 
+
         dataset = Data_filter.load_database(self.paths.raw, self.paths.database, "video")
 
         trials_by_group = {}
 
-        for clip_path in tqdm(dataset["filename"].iloc[:], desc="building metadata"):
+        for clip_path in dataset["filename"].iloc[:]:
+
+            clip = Video(clip_path)
+            print("\nBuilding metadata:", clip.path.stem)
+
+            if not clip.is_openable or not clip.is_readable: 
+                continue
+
+            if (clip.path.parent / f"{clip.path.stem}.yaml").exists(): 
+                print("Metadata already builded !")
+                continue
 
             trial = Trial(clip_path=clip_path)
 
@@ -167,7 +198,46 @@ class Project(BaseProject):
         # d'essai par groupe
         # u.metadata_report(...)
 
+
+    @process_time   
+    def update_metadata(self): 
+        """Update every metadata of each trial EXEPT the LEDs info"""
+
+        joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
         
+        trialgroup = TrialGroup(joblib_filenames, self.conditions)
+
+        for trial in tqdm(trialgroup.trials, desc="Metadata update"): 
+
+            # get lever_position
+            etho_meta = {
+                "rat": int(trial.subject[1:]),
+                "day": trial.file.date.day,
+                "condition": trial.condition,
+                "view": trial.camera_view,
+                "month": trial.file.date.month,
+            }
+
+            anchors_position = u.match_rule(etho_meta, self.ethology_rules)
+            Boxes = BehaviorBox(xy_lever=anchors_position["lever"],
+                            xy_pad=anchors_position["pad"],
+                            view=trial.camera_view,
+                            frame_width=trial.frame_width_px)
+
+            trial.update(behaviorBox=Boxes,
+                        lever_position=anchors_position["lever"])
+
+            trial.set_task_success(self.project_info["laser_on_duration"])
+            trial.set_mvt_type(self.subject_info[trial.subject]["hemi"])
+            trial.set_group()
+
+            pred_path = trial.file.path.parent / f"pred_results_{trial.name}.csv"
+            if pred_path.exists(): 
+                trial.update(pred_path=str(pred_path))
+
+            trial.save_yaml()
+
+        trialgroup.save(self.paths.trials_metadata)
 
 
 

@@ -106,7 +106,12 @@ class Trial(BaseTrial):
         )
 
     def set_mvt_type(self, hemi_info: str):
-        contra_rule = {"CueL1": "RightHemi", "CueL2": "LeftHemi"}
+        contra_rule = {"CueL1": "RightHemi", 
+                       "CueL2": "LeftHemi"}
+        if self.cue_type == "NoCue": 
+            self.update(movement_type="UNKNOWN")
+            return
+
         is_contra = (
             hemi_info[self.condition] == self.stim_location
             and contra_rule[self.cue_type] == self.stim_location
