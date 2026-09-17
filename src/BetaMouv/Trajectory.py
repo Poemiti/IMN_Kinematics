@@ -88,9 +88,41 @@ class Trajectory(BaseTrajectory):
                 i += 1
 
         return clean_mask
-    
 
-    def filter_outliers(self, coords: pd.DataFrame, stat_method: str = 'mad') -> pd.DataFrame : 
+    @staticmethod
+    def outlier_regression(self, t: float, x: float, y: float) : 
+        """Return a mask of outliers. True = is an outlier"""
+        s_factor=3.0
+        k=2
+        s=1000
+
+        # Fit splines 
+        tck_x = make_splrep(t, x, k=k, s=s)
+        tck_y = make_splrep(t, y, k=k, s=s)
+
+        # Predicted smooth trajectory
+        x_pred = splev(t, tck_x)
+        y_pred = splev(t, tck_y)
+
+        # Compute dists distance
+        dists = np.sqrt((x - x_pred)**2 + (y - y_pred)**2)
+        thresh = np.nanmean(dists) + s_factor * np.nanstd(dists)
+        return dists < thresh
+
+
+    def outlier_euclidian_dist(self, coords, threshold: float): 
+        """Return a mask of outliers. True = is an outlier
+        Follows euclidian distances"""
+
+        diffs = coords[["x", "y"]].diff()
+        dists = np.sqrt((diffs**2).sum(axis=1))
+
+        # remove consecutive outliers
+        is_outlier = dists >= threshold
+        return self._remove_consecutiv_outliers(is_outlier, max_len=3)
+
+
+    def filter_outliers(self, coords: pd.DataFrame, method: str = 'eucli', thresh: float=0.6) -> pd.DataFrame : 
         """
         Detect outliers in coordinates and put them to NaN
 
@@ -104,52 +136,20 @@ class Trajectory(BaseTrajectory):
         
         filtered_coords: pd.DataFrame = coords.copy()
 
-        t = coords["t"].to_numpy(dtype=float)
-        x = coords["x"].to_numpy(dtype=float)
-        y = coords["y"].to_numpy(dtype=float)
+        if method == "regression": 
 
+            t = coords["t"].to_numpy(dtype=float)
+            x = coords["x"].to_numpy(dtype=float)
+            y = coords["y"].to_numpy(dtype=float)
 
-        if stat_method == "regression" : 
-            s_factor=3.0
-            k=2
-            s=1000
+            outlier_mask = self.outlier_regression(t, x, y)
 
-            # Fit splines 
-            tck_x = make_splrep(t, x, k=k, s=s)
-            tck_y = make_splrep(t, y, k=k, s=s)
+        elif method == "eucli"  : 
+            outlier_mask = self.outlier_euclidian_dist(coords, threshold=thresh)
 
-            # Predicted smooth trajectory
-            x_pred = splev(t, tck_x)
-            y_pred = splev(t, tck_y)
+        filtered_coords.loc[outlier_mask, ["x", "y"]] = np.nan
 
-            # Compute dists distance
-            dists = np.sqrt((x - x_pred)**2 + (y - y_pred)**2)
-            thresh = np.nanmean(dists) + s_factor * np.nanstd(dists)
-            mask = dists < thresh
-
-            params = (dists, thresh, mask)
-
-
-        if stat_method == "eucli" : 
-            threshold = 0.55  # cm
-
-            # compute displacement
-            diffs = coords[["x","y"]].diff()
-            dists = np.sqrt((diffs**2).sum(axis=1))
-
-            # remove consecutive outliers
-            is_outlier = dists >= threshold
-            is_outlier = self._remove_consecutiv_outliers(is_outlier, max_len=3)
-            mask = is_outlier   
-
-            params = (dists, threshold, mask)
-
-        else:
-            raise ValueError(f"Unknown stat_method '{stat_method}'")
-        
-        filtered_coords.loc[mask, ["x", "y"]] = np.nan
-
-        return filtered_coords, params
+        return filtered_coords
 
 
 
@@ -196,6 +196,7 @@ class Trajectory(BaseTrajectory):
                 interp_series = series.interpolate(
                     method='spline',
                     order=3,
+                    s=0,
                     limit=max_gap,
                     limit_direction='both'
                 )
@@ -216,17 +217,20 @@ class Trajectory(BaseTrajectory):
 
         return coords_interpolated
 
+    
+
 
     ####################### plotting methods ########################
 
-    def make_interpolation_figures(self, 
-                                    interpolated_coords, 
-                                    likelihood_filtered_coords,
-                                    outlier_filtered_coords,
-                                    raw_coords,
-                                    time_pad_off,
-                                    title, 
-                                    save_as):
+
+    def plot_preprocess(self, 
+                        interpolated_coords, 
+                        # likelihood_filtered_coords,
+                        outlier_filtered_coords,
+                        raw_coords,
+                        time_pad_off,
+                        title, 
+                        save_as):
 
         def _plot_traj(coord, offset, label, color, ax: plt.axes = None, marker: str = None):
 
@@ -259,39 +263,61 @@ class Trajectory(BaseTrajectory):
 
 
         fig = plt.figure(figsize=(12,6))
-        gs = fig.add_gridspec(2, 2)
+        gs = fig.add_gridspec(3, 2)
 
         offset = 0.2  # cm
 
         ax_xt = fig.add_subplot(gs[0,0])      # x(t)
         ax_yt = fig.add_subplot(gs[1,0])      # y(t)
+        ax_dist = fig.add_subplot(gs[2,0])      # distance
         ax_traj = fig.add_subplot(gs[:,1])    # trajectory spans both rows
 
-        _plot_xy([ax_xt, ax_yt], interpolated_coords, 3*offset,"#0570b0", "|", "3.interpolate")
-        _plot_xy([ax_xt, ax_yt], likelihood_filtered_coords, 2*offset,"#74a9cf", "|", "2.likelihood")
-        _plot_xy([ax_xt, ax_yt], outlier_filtered_coords, 1*offset, "#bdc9e1","|", "1.outlier")
+        _plot_xy([ax_xt, ax_yt], interpolated_coords, 4*offset,"#0570b0", "|", "3.interpolate")
+        # _plot_xy([ax_xt, ax_yt], likelihood_filtered_coords, 2*offset,"#74a9cf", "|", "2.likelihood")
+        _plot_xy([ax_xt, ax_yt], outlier_filtered_coords, 2*offset, "#bdc9e1","|", "1.outlier")
         _plot_xy([ax_xt, ax_yt], raw_coords, 0*offset, "#d1cbdc","|", "0.raw", time_pad_off)
+
+        # raw distances
+        ax_dist.plot(raw_coords["t"], raw_coords["distances"], color="#d1cbdc")
+        ax_dist.scatter(raw_coords["t"], raw_coords["distances"], color="#d1cbdc", marker="|")
+
+        # interpolated distances
+        ax_dist.plot(interpolated_coords["t"], interpolated_coords["distances"] , color="#0570b0")
+        ax_dist.scatter(interpolated_coords["t"], interpolated_coords["distances"] , color="#0570b0", marker="|")
+        ax_dist.axhline(y=0.55, linestyle="--", color="k", label="threshold", lw=0.5)
         
-        pad_off_frame = int((time_pad_off - 0.1)* 125)
-        pad_off_frame = pad_off_frame if pad_off_frame >=0 else 0
-        off_frame = int((time_pad_off + 0.4) * 125)
+        # pad_off_frame = int((time_pad_off - 0.1)* 125)
+        # pad_off_frame = pad_off_frame if pad_off_frame >=0 else 0
+        # off_frame = int((time_pad_off + 0.4) * 125)
         
-        _plot_traj(raw_coords[pad_off_frame : off_frame], 0*offset, "1.raw", "#d1cbdc", ax_traj)
-        _plot_traj(outlier_filtered_coords[pad_off_frame : off_frame], 0*offset, "2.outlier", "#bdc9e1" ,ax_traj, "")
-        _plot_traj(likelihood_filtered_coords[pad_off_frame : off_frame], 0*offset, "3.likelihood", "#74a9cf" ,ax_traj, "")
-        _plot_traj(interpolated_coords[pad_off_frame : off_frame], 0*offset, "4.interpolate", "#0570b0" ,ax_traj, "|")
+        # _plot_traj(raw_coords[pad_off_frame : off_frame], 0*offset, "1.raw", "#d1cbdc", ax_traj)
+        # _plot_traj(outlier_filtered_coords[pad_off_frame : off_frame], 0*offset, "2.outlier", "#bdc9e1" ,ax_traj, "")
+        # _plot_traj(likelihood_filtered_coords[pad_off_frame : off_frame], 0*offset, "3.likelihood", "#74a9cf" ,ax_traj, "")
+        # _plot_traj(interpolated_coords[pad_off_frame : off_frame], 0*offset, "4.interpolate", "#0570b0" ,ax_traj, "|")
+
+        _plot_traj(raw_coords, 0*offset, "1.raw", "#d1cbdc", ax_traj)
+        _plot_traj(outlier_filtered_coords, 0*offset, "2.outlier", "#bdc9e1" ,ax_traj, "")
+        _plot_traj(interpolated_coords, 0*offset, "4.interpolate", "#0570b0" ,ax_traj, "|")
+
 
         ax_xt.set(
             ylabel=("x (cm)"),
-            xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
+            # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             )
+        ax_xt.set_xticks([])
 
         ax_yt.set(
             ylabel=("y (cm)"),
-            xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
-            xlabel=("time (s)"),
+            # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             )
         ax_yt.invert_yaxis()
+        ax_yt.set_xticks([])
+
+        ax_dist.set(
+            ylabel=("distance (cm)"),
+            xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
+            xlabel=("time (s)")
+            )
 
         ax_traj.set(
             xlabel=("x (cm)"),

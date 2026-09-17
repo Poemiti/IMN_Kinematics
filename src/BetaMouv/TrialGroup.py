@@ -6,6 +6,8 @@ from .Trial import Trial
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+import numpy as np 
 
 
 custom_params = {"axes.spines.right": False, "axes.spines.top": False}
@@ -76,23 +78,28 @@ class TrialGroup(BaseTrialGroup):
         return self._scalar_df
 
 
-    def timeseries_df(self, value_cols: list[str] = ["x", "y", "instant_velocity"]) -> pd.DataFrame:
+    def timeseries_df(self, value_cols: list[str] = ["x", "y", "instant_velocity"],
+                      crop_laser_period: bool = False) -> pd.DataFrame:
         """Many rows per trial (one per frame/timestamp) : for plots over time."""
 
         if self._timeseries_df is None:
             frames = []
 
-            for trial in self.trials:
+            for trial in tqdm(self.trials, desc="Building timeseries_df"):
                 if not trial._is_successful() :
                     continue
 
                 df = trial.coords[["t", *value_cols]].copy()
+                if crop_laser_period: 
+                    df = df[(df["t"] >= trial.time_pad_off) &
+                            (df["t"] <= trial.time_pad_off + 0.325)]
+
                 for col, val in trial.identity().items():
                     df[col] = val
                 frames.append(df)
 
-                if len(df) < 375: 
-                    print( trial.name)
+                # if len(df) < 375: 
+                #     print( trial.name, len(df))
 
             self._timeseries_df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -102,6 +109,115 @@ class TrialGroup(BaseTrialGroup):
 
     
     ####################### plotting methods ###########################
+
+    def lineplot_all_traj(self, save_as):
+        data = self.timeseries_df(value_cols=["x", "y"], crop_laser_period=True)
+
+        # order traj in time + crop around pad off
+        data = data.sort_values(["name", "t"])
+        print(data)
+
+        plt.figure(figsize=(8, 8))
+
+        # Individual trajectories
+        sns.lineplot(
+            data=data,
+            x="x",
+            y="y",
+            units="name",
+            estimator=None,
+            sort=False,
+            color="gray",
+            alpha=0.2,
+            linewidth=1,
+            legend=False,
+        )
+
+        # Mean trajectory
+        mean_data = (
+            data.groupby("t", as_index=False)[["x", "y"]]
+            .mean()
+            .sort_values("t")
+        )
+
+        sns.lineplot(
+            data=mean_data,
+            x="x",
+            y="y",
+            color="red",
+            linewidth=3,
+            sort=False,
+            label="Mean trajectory",
+        )
+
+        plt.title(f"{self.group_name}\n n_trial={data['name'].nunique()}")
+        plt.xlabel("x (cm)")
+        plt.ylabel("y (cm)")
+        plt.axis("equal")
+        plt.legend()
+
+        plt.savefig(save_as, bbox_inches="tight", dpi=300)
+        plt.show()
+        plt.close()
+
+
+
+    def distri_outlier(self, data: pd.DataFrame, save_as):
+        """Visualize the distribution of outliers."""
+
+        n_trial = data["trial"].nunique()
+
+        # Create a categorical variable separating zero from non-zero
+        plot_data = data.copy()
+        plot_data["outlier_status"] = np.where(
+                plot_data["n_outlier"] == 0,
+                "No outlier",
+                "≥1 outlier"
+            )
+
+        fig, axes = plt.subplots(
+            1, 2,
+            figsize=(12, 5),
+            gridspec_kw={"width_ratios": [1, 2]}
+        )
+
+        # 1. Zero vs non-zero outliers
+        sns.countplot(
+            data=plot_data,
+            x="outlier_status",
+            hue="type",
+            ax=axes[0], legend=False
+        )
+
+        axes[0].set_title("Trials with / without outliers")
+        axes[0].set_xlabel("")
+        axes[0].set_ylabel("Number of trials")
+
+        # 2. Distribution among trials with outliers
+        non_zero = plot_data[plot_data["n_outlier"] > 0]
+
+        sns.histplot(
+            data=non_zero,
+            x="n_outlier",
+            hue="type",
+            discrete=True,
+            multiple="dodge",
+            shrink=0.8,
+            ax=axes[1]
+        )
+
+        axes[1].set_title("Number of outliers\n(trials with ≥1 outlier)")
+        axes[1].set_xlabel("Number of outliers")
+        axes[1].set_ylabel("Number of trials")
+
+        fig.suptitle(
+            f"Outlier distribution - {self.group_name}\n"
+            f"n_trial={n_trial}")
+
+        plt.tight_layout()
+        plt.savefig(save_as, bbox_inches="tight", dpi=300)
+        plt.show()
+        plt.close()
 
 
     def plot_tendency(self, value , save_as): 

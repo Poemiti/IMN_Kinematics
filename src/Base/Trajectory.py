@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 
 
 class Trajectory: 
+    """A trajectory is defined in a classical cartesian plane, in cm"""
 
     file_cls = BaseFile
 
@@ -132,7 +133,15 @@ class Trajectory:
 
     ############## Compute some metrics ###################
 
+    def crop_xy(self, coords: pd.DataFrame = None, start: float = 0, end: float = 0.4) -> pd.DataFrame :  
+        """Crop coordinates from [start : end]"""
+        if coords is None:
+            coords = self.coords
 
+        return coords.loc[
+            (coords["t"] >= start) &
+            (coords["t"] <= end)
+        ].reset_index(drop=True)
 
     def compute_instant_metrics(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
         if coords is None:
@@ -141,9 +150,19 @@ class Trajectory:
         coords["instant_velocity"] = self.instant_velocity(coords)
         coords["instant_acc"] = self.acceleration(coords)
         coords["lever_distance"] = self.lever_bodypart_distance(coords)
+        coords["distances"] = self.distances(coords)
 
         return coords
 
+
+    def distances(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
+        """Instantaneous distances between each points"""
+        if coords is None:
+            coords = self.coords
+
+        v = coords[["x", "y"]].diff()
+
+        return np.sqrt(v["x"]**2 + v["y"]**2)
 
 
     def velocity_vector(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:

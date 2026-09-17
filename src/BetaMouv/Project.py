@@ -282,11 +282,28 @@ class Project(BaseProject):
         ==============================================\n""")
         
         preprocess_dir = self.paths.results_root / "preprocess"
+        preprocess_dir.mkdir(parents=True, exist_ok=True)
+        preprocess_data_path = preprocess_dir / "preprocess_data_1.csv"
+        outlier_fig_path = preprocess_dir / "outlier_distri_1.png"
+
+        interpolation_dir = preprocess_dir / "interpolation"
 
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
 
-        dist = pd.DataFrame()
+
+        # if (preprocess_data_path).exists(): 
+        #     print("Loading preprocess data")
+        #     preprocess_data = pd.read_csv(preprocess_data_path)
+        #     trialgroup.distri_outlier(preprocess_data, save_as=outlier_fig_path)        
+        #     return 
+        
+        preprocess_data = {
+            "trial": [],
+            "n_outlier": [],
+            "type": [],
+            "accepted": []
+        }
 
         for trial in tqdm(trialgroup.trials, desc="Preprocessing"):
 
@@ -301,24 +318,52 @@ class Project(BaseProject):
                 view=trial.camera_view,
                 cm_per_pixel=trial.cm_per_pixel, 
                 lever_position=trial.lever_position,
+                # pad_position=trial.pad_position
             )
 
-            raw_coords = traj.coords
-            outlier_filtered, params = traj.filter_outliers(raw_coords, stat_method="eucli")
-            likelihood_filtered, _ = traj.filter_likelihood(outlier_filtered, 0.7)
-            interpolated = traj.interpolate_data(likelihood_filtered, method="spline", max_gap=5)
+            raw_coords = traj.crop_xy(start=trial.time_pad_off - 0.1, end=trial.time_pad_off + 0.4)
+            raw_coords = traj.compute_instant_metrics(raw_coords)
+            raw_outlier_mask = traj.outlier_euclidian_dist(raw_coords, threshold=0.6)
+            outlier_coords = traj.filter_outliers(coords=raw_coords)
 
-            traj.make_interpolation_figures(
-                interpolated_coords=interpolated,
-                likelihood_filtered_coords=likelihood_filtered,
-                outlier_filtered_coords=outlier_filtered,
+            interpolated_coords = traj.interpolate_data(coords=outlier_coords, method="spline", max_gap=5)
+            interpolated_coords = traj.compute_instant_metrics(interpolated_coords)
+            interpolated_outlier_mask = traj.outlier_euclidian_dist(interpolated_coords, threshold=0.6)
+
+            n_raw_outliers = len([o for o in raw_outlier_mask if o==True])
+            n_interpolated_outliers = len([o for o in interpolated_outlier_mask if o==True])
+            traj_state = n_raw_outliers < 10 and n_interpolated_outliers < 10
+
+            preprocess_data["trial"].append(trial.name)
+            preprocess_data["n_outlier"].append(n_raw_outliers)
+            preprocess_data["type"].append("raw")
+            preprocess_data["accepted"].append(traj_state)
+
+            preprocess_data["trial"].append(trial.name)
+            preprocess_data["n_outlier"].append(n_interpolated_outliers)
+            preprocess_data["type"].append("interpolated")
+            preprocess_data["accepted"].append(traj_state)
+            
+
+            traj.plot_preprocess(
+                interpolated_coords=interpolated_coords,
+                # likelihood_filtered_coords=likelihood_filtered,
+                outlier_filtered_coords=outlier_coords,
                 raw_coords=raw_coords,
                 time_pad_off=trial.time_pad_off,
                 title=f"{trial.name}",
-                save_as=preprocess_dir / f"interpolation_{trial.name}.png",
+                save_as=interpolation_dir / f"interpolation_{trial.name}.png",
             )
 
-            trial.update(traj=traj)
+            trial.update(traj=traj, 
+                         coords=traj.coords)
+
+        outlier_df = pd.DataFrame(preprocess_data)
+        outlier_df.to_csv(preprocess_data_path)
+
+        trialgroup.distri_outlier(data=outlier_df, save_as=outlier_fig_path)
+
+        # trialgroup.lineplot_all_traj(save_as=raw_coords_dir / "all_traj(laser period only).png")
 
         trialgroup.save(self.paths.trials_metadata)
 

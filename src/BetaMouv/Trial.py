@@ -91,7 +91,8 @@ class Trial(BaseTrial):
         if self.task_success is None: 
             raise ValueError(f"'Task success' not defined, must run 'build_metadata' first")
         if self.model_success is None: 
-            raise ValueError(f"'Model success' not defined, must run 'validation' first")
+            # print(f"'Model success' not defined, must run 'validation' first")
+            return self.task_success
         
         return self.task_success and self.model_success
     

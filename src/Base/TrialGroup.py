@@ -20,7 +20,7 @@ class TrialGroup:
         self.keep_val = []
         for condition, criteria in self.condition.items():
             self.keep_val.extend(value for value, keep in criteria.items() if keep)
-
+        self.group_name = "_".join(self.keep_val)
 
     def _filter_joblib(self) -> list[dict]:
         trials = []
