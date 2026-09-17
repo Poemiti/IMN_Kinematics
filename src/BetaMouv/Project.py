@@ -283,20 +283,22 @@ class Project(BaseProject):
         
         preprocess_dir = self.paths.results_root / "preprocess"
         preprocess_dir.mkdir(parents=True, exist_ok=True)
-        preprocess_data_path = preprocess_dir / "preprocess_data_1.csv"
-        outlier_fig_path = preprocess_dir / "outlier_distri_1.png"
+        preprocess_data_path = preprocess_dir / "preprocess_data_3.csv"
+        outlier_fig_path = preprocess_dir / "outlier_distri_3.png"
 
         interpolation_dir = preprocess_dir / "interpolation"
+        interpolation_dir.mkdir(parents=True, exist_ok=True)
 
         joblib_filenames = self.paths.trials_metadata.glob("*.joblib")
         trialgroup = TrialGroup(joblib_filenames, self.conditions)
 
+        distance_thresh = 0.6
 
-        # if (preprocess_data_path).exists(): 
-        #     print("Loading preprocess data")
-        #     preprocess_data = pd.read_csv(preprocess_data_path)
-        #     trialgroup.distri_outlier(preprocess_data, save_as=outlier_fig_path)        
-        #     return 
+        if (preprocess_data_path).exists(): 
+            print("Loading preprocess data")
+            preprocess_data = pd.read_csv(preprocess_data_path)
+            trialgroup.distri_outlier(preprocess_data, save_as=outlier_fig_path)        
+            return 
         
         preprocess_data = {
             "trial": [],
@@ -313,6 +315,9 @@ class Project(BaseProject):
             # if trial.name != "Rat_#517Ambidexter_20240621_Session2_ContiMT300_0,5mW_Laser3070_RightHemiCHR_L1L25050_C001H001S0001_clip_40": 
             #     continue
 
+            # if trial.name != "Rat_#517Ambidexter_20240526_Session2_ContiMT300_0,5mW_Laser3070_RightHemiCHR_L1L25050_C001H001S0001_clip_07": 
+            #     continue
+
             traj = Trajectory(
                 coords_path=trial.pred_path,
                 view=trial.camera_view,
@@ -321,14 +326,19 @@ class Project(BaseProject):
                 # pad_position=trial.pad_position
             )
 
-            raw_coords = traj.crop_xy(start=trial.time_pad_off - 0.1, end=trial.time_pad_off + 0.4)
+            GAP = 0.15
+
+            raw_coords = traj.crop_xy(start=0.2, end=trial.time_pad_off + 0.4)
             raw_coords = traj.compute_instant_metrics(raw_coords)
-            raw_outlier_mask = traj.outlier_euclidian_dist(raw_coords, threshold=0.6)
-            outlier_coords = traj.filter_outliers(coords=raw_coords)
+            # raw_outlier_mask = traj.outlier_euclidian_dist(raw_coords, threshold=distance_thresh)
+            raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=distance_thresh, gap_scale=GAP)
+
+            outlier_coords = traj.filter_outliers(coords=raw_coords, method="eucli_anchored", gap_scale=GAP)
 
             interpolated_coords = traj.interpolate_data(coords=outlier_coords, method="spline", max_gap=5)
             interpolated_coords = traj.compute_instant_metrics(interpolated_coords)
-            interpolated_outlier_mask = traj.outlier_euclidian_dist(interpolated_coords, threshold=0.6)
+            # interpolated_outlier_mask = traj.outlier_euclidian_dist(interpolated_coords, threshold=distance_thresh)
+            interpolated_outlier_mask = traj.outlier_euclidian_dist_anchored(interpolated_coords, threshold=distance_thresh, gap_scale=GAP)
 
             n_raw_outliers = len([o for o in raw_outlier_mask if o==True])
             n_interpolated_outliers = len([o for o in interpolated_outlier_mask if o==True])
@@ -343,17 +353,16 @@ class Project(BaseProject):
             preprocess_data["n_outlier"].append(n_interpolated_outliers)
             preprocess_data["type"].append("interpolated")
             preprocess_data["accepted"].append(traj_state)
-            
 
-            traj.plot_preprocess(
-                interpolated_coords=interpolated_coords,
-                # likelihood_filtered_coords=likelihood_filtered,
-                outlier_filtered_coords=outlier_coords,
-                raw_coords=raw_coords,
-                time_pad_off=trial.time_pad_off,
-                title=f"{trial.name}",
-                save_as=interpolation_dir / f"interpolation_{trial.name}.png",
-            )
+            # traj.plot_preprocess(
+            #     interpolated_coords=interpolated_coords,
+            #     # likelihood_filtered_coords=likelihood_filtered,
+            #     outlier_filtered_coords=outlier_coords,
+            #     raw_coords=raw_coords,
+            #     time_pad_off=trial.time_pad_off,
+            #     title=f"{trial.name}",
+            #     save_as=interpolation_dir / f"interpolation_{trial.name}.png",
+            # )
 
             trial.update(traj=traj, 
                          coords=traj.coords)

@@ -63,29 +63,31 @@ class Trajectory(BaseTrajectory):
         return filtered_coords, computed_thresh
 
     @staticmethod
-    def _remove_consecutiv_outliers(mask, max_len=2):
+    def _remove_consecutiv_outliers(mask):
         """True = outlier detected"""
         clean_mask = mask.copy()
         mask_size = len(mask)
 
-        i = 0
-        while i < mask_size:
-            if clean_mask[i]:
-                start = i
+        is_out = False
 
-                while i < mask_size and clean_mask[i]:
-                    i += 1
+        for i in range(mask_size): 
 
-                end = i
-                length = end - start
+            if clean_mask[i] and not is_out : # init outlier list
+                print(i, "IS OUT")
+                is_out = True
+                continue
 
-                left_bad = start > 0 and not clean_mask[start-1]
-                right_bad = end < mask_size and not clean_mask[end]
+            elif not clean_mask[i] and is_out :  # add outlier
+                print(i, "IS OUT AGAIN")
+                clean_mask[i] = True
+                continue
 
-                if left_bad and right_bad and length <= max_len:
-                    clean_mask[start:end] = True
-            else:
-                i += 1
+            elif clean_mask[i] and is_out :  # back to "normality"
+                print(i, "BACK TO NORMALITY")
+                is_out = False
+                continue
+
+        print(clean_mask)
 
         return clean_mask
 
@@ -118,11 +120,42 @@ class Trajectory(BaseTrajectory):
         dists = np.sqrt((diffs**2).sum(axis=1))
 
         # remove consecutive outliers
-        is_outlier = dists >= threshold
-        return self._remove_consecutiv_outliers(is_outlier, max_len=3)
+        is_outlier = dists >= threshold + 0.1
+        return self._remove_consecutiv_outliers(is_outlier)
 
 
-    def filter_outliers(self, coords: pd.DataFrame, method: str = 'eucli', thresh: float=0.6) -> pd.DataFrame : 
+    def outlier_euclidian_dist_anchored(self, coords: pd.DataFrame, threshold: float, gap_scale: float = 0.0):
+        """
+        Sequential outlier detection anchored on the last CONFIRMED-good point.
+        Correctly catches 'stuck cluster' outliers (consecutive bad points that
+        are close to each other but far from the real trajectory), which a
+        naive previous-point diff cannot see.
+
+        :param threshold: max plausible distance for a single-frame step
+        :param gap_scale: extra allowed distance per frame since last good point,
+                        to avoid falsely flagging legitimate fast movement
+                        after a gap (e.g. during peak reach velocity)
+        """
+        xy = coords[["x", "y"]].to_numpy()
+        n = len(xy)
+        is_outlier = np.zeros(n, dtype=bool)
+
+        last_good_idx = 0
+        for i in range(1, n):
+            if np.isnan(xy[i]).any():
+                continue
+            gap = i - last_good_idx
+            local_threshold = threshold + gap_scale * (gap - 1)
+            dist = np.linalg.norm(xy[i] - xy[last_good_idx])
+
+            if dist < local_threshold:
+                last_good_idx = i      # accept -> becomes new anchor
+            else:
+                is_outlier[i] = True   # stays flagged; anchor NOT updated
+        return is_outlier
+
+
+    def filter_outliers(self, coords: pd.DataFrame, method: str = 'eucli', thresh: float=0.6, gap_scale: float= 0.0) -> pd.DataFrame : 
         """
         Detect outliers in coordinates and put them to NaN
 
@@ -146,6 +179,10 @@ class Trajectory(BaseTrajectory):
 
         elif method == "eucli"  : 
             outlier_mask = self.outlier_euclidian_dist(coords, threshold=thresh)
+
+
+        elif method == "eucli_anchored"  : 
+            outlier_mask = self.outlier_euclidian_dist_anchored(coords, threshold=thresh, gap_scale=gap_scale)
 
         filtered_coords.loc[outlier_mask, ["x", "y"]] = np.nan
 
@@ -284,7 +321,8 @@ class Trajectory(BaseTrajectory):
         # interpolated distances
         ax_dist.plot(interpolated_coords["t"], interpolated_coords["distances"] , color="#0570b0")
         ax_dist.scatter(interpolated_coords["t"], interpolated_coords["distances"] , color="#0570b0", marker="|")
-        ax_dist.axhline(y=0.55, linestyle="--", color="k", label="threshold", lw=0.5)
+        ax_dist.axhline(y=0.55, linestyle="--", color="red", label="threshold", lw=0.5)
+        ax_dist.axvline(x=time_pad_off, linestyle="--", color="k", label="pad_off", lw=0.5)
         
         # pad_off_frame = int((time_pad_off - 0.1)* 125)
         # pad_off_frame = pad_off_frame if pad_off_frame >=0 else 0
@@ -304,18 +342,18 @@ class Trajectory(BaseTrajectory):
             ylabel=("x (cm)"),
             # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             )
-        ax_xt.set_xticks([])
+        # ax_xt.set_xticks([])
 
         ax_yt.set(
             ylabel=("y (cm)"),
             # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             )
         ax_yt.invert_yaxis()
-        ax_yt.set_xticks([])
+        # ax_yt.set_xticks([])
 
         ax_dist.set(
             ylabel=("distance (cm)"),
-            xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
+            # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             xlabel=("time (s)")
             )
 
