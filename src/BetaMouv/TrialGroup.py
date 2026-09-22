@@ -38,6 +38,12 @@ class TrialGroup(BaseTrialGroup):
         self._scalar_df = None
         self._timeseries_df = None
 
+        self.crop_laser_period = False
+
+
+    def crop_coords(self, bool_val: bool): 
+        self.crop_laser_period = bool_val
+        print("Coordinates cropped from pad_off to end of laser stimulation !")
 
     def success_df(self) -> pd.DataFrame:
         """One row per trial, including failures — for QC / yield figures
@@ -48,10 +54,12 @@ class TrialGroup(BaseTrialGroup):
 
             for trial in self.trials:
                 records.append(trial.identity() | {
-                    "task_success": getattr(trial, "task_success", None),
-                    "task_success_reason": getattr(trial, "task_success_reason", None),
-                    "model_success": getattr(trial, "model_success", None),
-                    "model_success_reason": getattr(trial, "model_success_reason", None),
+                    "task_success": trial.task_success ,
+                    "task_success_reason": trial.task_success_reason ,
+                    "coords_success": trial.coords_success,
+                    "coords_success_reason": trial.coords_success_reason,
+                    "validation_success": trial.validation_success,
+                    "validation_success_reason": trial.validation_success_reason,
                 })
 
             self._success_df = pd.DataFrame(records)
@@ -78,8 +86,7 @@ class TrialGroup(BaseTrialGroup):
         return self._scalar_df
 
 
-    def timeseries_df(self, value_cols: list[str] = ["x", "y", "instant_velocity"],
-                      crop_laser_period: bool = False) -> pd.DataFrame:
+    def timeseries_df(self, value_cols: list[str] = ["x", "y", "instant_velocity"]) -> pd.DataFrame:
         """Many rows per trial (one per frame/timestamp) : for plots over time."""
 
         if self._timeseries_df is None:
@@ -90,16 +97,12 @@ class TrialGroup(BaseTrialGroup):
                     continue
 
                 df = trial.coords[["t", *value_cols]].copy()
-                if crop_laser_period: 
-                    df = df[(df["t"] >= trial.time_pad_off) &
-                            (df["t"] <= trial.time_pad_off + 0.325)]
+                if self.crop_laser_period: 
+                    df = trial.traj.crop_xy(df, trial.time_pad_off, trial.time_pad_off + 0.4)
 
                 for col, val in trial.identity().items():
                     df[col] = val
                 frames.append(df)
-
-                # if len(df) < 375: 
-                #     print( trial.name, len(df))
 
             self._timeseries_df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
@@ -110,44 +113,117 @@ class TrialGroup(BaseTrialGroup):
     
     ####################### plotting methods ###########################
 
+    def success_rate_report(self, save_as):
+        """Display success rates and failure reasons, and save the report."""
+
+        df = self.success_df()
+
+        n_trials = len(df)
+
+        if n_trials == 0:
+            report = "No trials found.\n"
+            print(report)
+            with open(save_as, "w") as f:
+                f.write(report)
+            return
+
+        # Store everything that will be printed
+        report_lines = []
+
+        report_lines.append(f"Total trials: {n_trials}\n")
+
+        # Success rates
+        success_columns = [
+            "task_success",
+            "coords_success",
+            "validation_success",
+        ]
+
+        report_lines.append("SUCCESS RATES")
+        report_lines.append("-" * 40)
+
+        for column in success_columns:
+            # Treat None/NaN as False
+            success = df[column].fillna(False).astype(bool)
+
+            n_success = success.sum()
+            rate = n_success / n_trials * 100
+
+            report_lines.append(
+                f"{column:20s}: "
+                f"{n_success:4d}/{n_trials:<4d} "
+                f"({rate:5.1f}%)"
+            )
+
+        # Failure reasons
+        reason_columns = [
+            ("task_success", "task_success_reason"),
+            ("coords_success", "coords_success_reason"),
+            ("validation_success", "validation_success_reason"),
+        ]
+
+        for success_col, reason_col in reason_columns:
+
+            failures = df[reason_col].dropna()
+
+            report_lines.append(f"\n{reason_col}")
+            report_lines.append("-" * 40)
+
+            if failures.empty:
+                report_lines.append("No failures")
+                continue
+
+            counts = failures.value_counts()
+
+            for reason, count in counts.items():
+                percentage = count / n_trials * 100
+
+                report_lines.append(
+                    f"{str(reason):30s}: "
+                    f"{count:4d} "
+                    f"({percentage:5.1f}%)"
+                )
+
+        report = "\n".join(report_lines) + "\n"
+        print(report)
+
+        with open(save_as, "w") as f:
+            f.write(report)
+
+        print(f"Report saved to: {save_as}")
+
+
+
     def lineplot_all_traj(self, save_as):
-        data = self.timeseries_df(value_cols=["x", "y"], crop_laser_period=True)
-
-        # order traj in time + crop around pad off
+        data = self.timeseries_df(value_cols=["x", "y"])
         data = data.sort_values(["name", "t"])
-        print(data)
 
-        plt.figure(figsize=(8, 8))
+        fig, ax = plt.subplots()
 
         # Individual trajectories
         sns.lineplot(
             data=data,
-            x="x",
-            y="y",
+            x="x", y="y",
             units="name",
             estimator=None,
             sort=False,
             color="gray",
             alpha=0.2,
-            linewidth=1,
-            legend=False,
+            legend=False, ax=ax
         )
 
-        # Mean trajectory
-        mean_data = (
-            data.groupby("t", as_index=False)[["x", "y"]]
-            .mean()
-            .sort_values("t")
-        )
+        data["index_order"] = data.groupby("name").cumcount()
+        mean_data =(data
+                    .groupby("index_order", as_index=False)[["x", "y"]]
+                    .mean())
 
         sns.lineplot(
             data=mean_data,
-            x="x",
-            y="y",
+            x="x", y="y",
             color="red",
             linewidth=3,
             sort=False,
-            label="Mean trajectory",
+            label="Mean trajectory", estimator=None
         )
 
         plt.title(f"{self.group_name}\n n_trial={data['name'].nunique()}")
@@ -231,9 +307,10 @@ class TrialGroup(BaseTrialGroup):
         from scipy.stats import sem
 
         data = self.timeseries_df(value_cols=[value])
+        data["index_order"] = data.groupby("name").cumcount()
 
         # align to pad off
-        data["relative_t"] = data["t"] - data["time_pad_off"]
+        data["relative_t"] = data["index_order"] * 0.08
 
         g = sns.FacetGrid(
             data=data,

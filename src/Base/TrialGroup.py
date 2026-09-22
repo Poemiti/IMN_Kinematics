@@ -51,9 +51,16 @@ class TrialGroup:
 
         return True
 
-    def save(self, output_dir: Path):
+    def save(self, output_dir: Path, trial_list: list = None):
         by_group = {}
-        for trial in self.trials:
+
+        if trial_list is None : 
+            print("Loading trials from trialgroup")
+            trial_list = self.trials
+        else: 
+            self.trials = trial_list
+
+        for trial in trial_list:
             by_group.setdefault(trial.group, []).append(trial)
 
         output_dir = Path(output_dir)

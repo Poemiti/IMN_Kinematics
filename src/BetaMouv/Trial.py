@@ -30,7 +30,8 @@ class Trial(BaseTrial):
 
         # computed after prediction and metadata_building
         "pred_path", "lever_position", "behaviorBox",
-        "model_success", "model_success_reason", "traj", "coords"
+        "validation_success", "validation_success_reason", "traj", 
+        "coords", "coords_success", "coords_success_reason"
     )
 
 
@@ -73,13 +74,15 @@ class Trial(BaseTrial):
 
         # set after prediction
         self.pred_path: str = None
-        self.task_success: bool = None
-        self.task_success_reason: str = None
+        self.task_success: bool = False
+        self.task_success_reason: str = "unknown"
 
         # set after preprocessing + validation
         self.coords: pd.Dataframe = None
-        self.model_success: bool = None
-        self.model_success_reason: str = None
+        self.coords_success: bool = False
+        self.coords_success_reason: str = "unknown"
+        self.validation_success: bool = False
+        self.validation_success_reason: str = "unknown"
 
         self.traj: Trajectory = None
 
@@ -90,12 +93,15 @@ class Trial(BaseTrial):
 
         if self.task_success is None: 
             raise ValueError(f"'Task success' not defined, must run 'build_metadata' first")
-        if self.model_success is None: 
+        if self.validation_success is None and self.coords_success is None: 
             # print(f"'Model success' not defined, must run 'validation' first")
             return self.task_success
+        if self.validation_success is None: 
+            return self.task_success and self.coords_success
         
-        return self.task_success and self.model_success
+        return self.task_success and self.coords_success and self.validation_success
     
+
 
     def set_led_info(self, led_obj: Leds):
         self.update(
@@ -133,18 +139,22 @@ class Trial(BaseTrial):
         Unsuccessful is when the paw we're looking at has not been lift in time"""
         if self.cue_type is None: 
             self.update(task_success = False,
-                        task_success_reason = "no_cue_detected")
+                        task_success_reason = "Rejected, no cue detected")
+
+        elif self.time_pad_off == 0 : 
+            self.update(task_success = False, 
+                        task_success_reason = "Rejected, bad split video")
 
         elif self.time_pad_off is None:
             # print("  ! Pad off time is None")
             self.update(task_success = False,
-                        task_success_reason = "no_pad_off")
+                        task_success_reason = "Rejected, no pad off")
 
         elif self.time_laser_on is not None and self.time_laser_on + laser_duration > 3:
             # print(f"  ! Laser window out of bounds (laser_on={time_laser_on})")
             self.update(task_success = False,
-                        task_success_reason = "late_pad_off")
+                        task_success_reason = "Rejected, late pad off")
 
         else : 
             self.update(task_success = True,
-                        task_success_reason = "paw_lifted")
+                        task_success_reason = "Successful, paw lifted")

@@ -26,6 +26,11 @@ class Trajectory(BaseTrajectory):
     ################## Trajectory filtration method ###############
     # specific to this project
 
+    def __init__(self, coords_path, view, bodypart = "finger_3", fps = 125, frame_width = 512, frame_height = 512, cm_per_pixel = None, lever_position = None):
+        super().__init__(coords_path, view, bodypart, fps, frame_width, frame_height, cm_per_pixel, lever_position)
+
+        self.interpolated_coords = None
+
 
     @staticmethod
     def _define_likelihood_threshold(coords: pd.DataFrame, thresh: float, percentile: float = None) -> float : 
@@ -340,20 +345,14 @@ class Trajectory(BaseTrajectory):
 
         ax_xt.set(
             ylabel=("x (cm)"),
-            # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             )
-        # ax_xt.set_xticks([])
 
         ax_yt.set(
             ylabel=("y (cm)"),
-            # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             )
-        ax_yt.invert_yaxis()
-        # ax_yt.set_xticks([])
 
         ax_dist.set(
             ylabel=("distance (cm)"),
-            # xlim=(time_pad_off - 0.1, time_pad_off + 0.4),
             xlabel=("time (s)")
             )
 
