@@ -18,9 +18,3 @@ steps:  # ordered
   compute_metrics: 
   analysis: t
 
-  # make_figures:
-  #   single_subject: false
-  #   single_trial: false
-  #   inter_subject: false
-
-

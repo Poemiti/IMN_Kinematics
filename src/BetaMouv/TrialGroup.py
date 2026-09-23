@@ -45,6 +45,22 @@ class TrialGroup(BaseTrialGroup):
         self.crop_laser_period = bool_val
         print("Coordinates cropped from pad_off to end of laser stimulation !")
 
+
+    def buils_timeseries_df(self, save_as, init: bool = False):
+        if init: 
+            self._timeseries_df = self.timeseries_df()
+            self._timeseries_df.to_csv(save_as)
+            return 
+              
+        if save_as.exists() : 
+            print(f"Loading timeseries_df from : '{save_as}'")
+            self._timeseries_df = pd.read_csv(save_as)
+            return
+
+        self._timeseries_df = self.timeseries_df()
+        self._timeseries_df.to_csv(save_as)
+
+
     def success_df(self) -> pd.DataFrame:
         """One row per trial, including failures — for QC / yield figures
         (e.g. success rate by condition, why trials were excluded)."""
@@ -86,25 +102,31 @@ class TrialGroup(BaseTrialGroup):
         return self._scalar_df
 
 
-    def timeseries_df(self, value_cols: list[str] = ["x", "y", "instant_velocity"]) -> pd.DataFrame:
+    def timeseries_df(self) -> pd.DataFrame:
         """Many rows per trial (one per frame/timestamp) : for plots over time."""
 
-        if self._timeseries_df is None:
+        if self._timeseries_df is None or self._timeseries_df.columns:
             frames = []
 
             for trial in tqdm(self.trials, desc="Building timeseries_df"):
                 if not trial._is_successful() :
                     continue
 
-                df = trial.coords[["t", *value_cols]].copy()
+                df = trial.coords.copy()
+
                 if self.crop_laser_period: 
-                    df = trial.traj.crop_xy(df, trial.time_pad_off, trial.time_pad_off + 0.4)
+                    df = trial.traj.crop_xy(df, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
 
                 for col, val in trial.identity().items():
                     df[col] = val
+
+                df = df.loc[df["laser_intensity"] != "incompatible"]
+                df["index_order"] = range(len(df))
+                df["relative_t"] = (df["t"] - trial.time_pad_off).round(2)
+
                 frames.append(df)
 
-            self._timeseries_df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+            self._timeseries_df = pd.concat(frames, ignore_index=True)
 
         return self._timeseries_df
     
@@ -195,8 +217,10 @@ class TrialGroup(BaseTrialGroup):
 
 
     def lineplot_all_traj(self, save_as):
-        data = self.timeseries_df(value_cols=["x", "y"])
-        data = data.sort_values(["name", "t"])
+        data = self._timeseries_df
+        
+        if data is None: 
+            data = self.timeseries_df() 
 
         fig, ax = plt.subplots()
 
@@ -212,7 +236,6 @@ class TrialGroup(BaseTrialGroup):
             legend=False, ax=ax
         )
 
-        data["index_order"] = data.groupby("name").cumcount()
         mean_data =(data
                     .groupby("index_order", as_index=False)[["x", "y"]]
                     .mean())
@@ -306,11 +329,10 @@ class TrialGroup(BaseTrialGroup):
         """
         from scipy.stats import sem
 
-        data = self.timeseries_df(value_cols=[value])
-        data["index_order"] = data.groupby("name").cumcount()
+        data = self._timeseries_df
 
-        # align to pad off
-        data["relative_t"] = data["index_order"] * 0.08
+        if data is None: 
+            data = self.timeseries_df()            
 
         g = sns.FacetGrid(
             data=data,
@@ -326,85 +348,14 @@ class TrialGroup(BaseTrialGroup):
             hue="laser_state", style="laser_state" ,
             palette=LASER_STATE_PALETTE, dashes=LASER_STATE_DASH,
             estimator="mean",
-            # errorbar = ("pi", 50),
+            errorbar = "se",  # SEM
         )
-
-        for row_i, laser_intensity in enumerate(g.row_names):
-            for col_j, laser_type in enumerate(g.col_names):
-
-                ax = g.axes[row_i, col_j]
-
-                # ax.set_ylim(0, 3)
-                # ax.set_xlim(-0.2, 1.5)
-
-                # Vertical line at pad off
-                ax.axvline(
-                    0,
-                    color="k",
-                    alpha=0.5,
-                    lw=0.8,
-                    ls="--",
-                )
-
-                # Laser period annotation
-                y = ax.get_ylim()[1] * 0.95
-
-                ax.hlines(
-                    y=y,
-                    xmin=0.025,
-                    xmax=0.325,
-                    color=LASER_PERIOD_COLOR,
-                    linewidth=3
-                )
-
-                ax.text(
-                    0.175,
-                    y,
-                    "Laser period",
-                    ha="center",
-                    va="bottom",
-                    color=LASER_PERIOD_COLOR,
-                    fontsize=10
-                )
-
-                # Manual SEM shading
-                # subset data for this facet
-                facet_df = data[
-                    (data["laser_type"] == laser_type) &
-                    (data["laser_intensity"] == laser_intensity)
-                ]
-
-                # do SEM separately for each hue group
-                for laser_state, sub in facet_df.groupby("laser_state"):
-
-                    grouped = (
-                        sub.groupby("relative_t")[value]
-                        .agg(
-                            mean="mean",
-                            sem=lambda x: sem(x, nan_policy="omit")
-                        )
-                        .reset_index()
-                        .sort_values("relative_t")
-                    )
-
-                    lower = grouped["mean"] - grouped["sem"]
-                    upper = grouped["mean"] + grouped["sem"]
-
-                    color = LASER_STATE_PALETTE[laser_state]
-
-                    ax.fill_between(
-                        grouped["relative_t"].values,
-                        lower.values,
-                        upper.values,
-                        color=color,
-                        alpha=0.20
-                    )
 
         g.add_legend()
 
         g.set_titles(col_template="{col_name}", row_template="{row_name}")
         g.set_axis_labels("Time (sec)", value)
-        g.figure.suptitle(f"{value[1]} over time\nNumber of trials: {len(data.groupby('name'))}", ha='center')
+        g.figure.suptitle(f"{value} over time\nNumber of trials: {len(data.groupby('name'))}", ha='center')
         g.figure.subplots_adjust(top=0.8)
 
         g.savefig(save_as)

@@ -3,18 +3,18 @@
 # movement type
 mvt_type: 
   CONTRA: true
-  IPSI: false
+  IPSI: 
 
 # condition
 condition: 
   CHR: true
-  CTRL: false
+  CTRL: 
 
 # subject
 subject: 
   "#517": true
-  "#525": false
-  "#521": false
+  "#525": 
+  "#521": 
   "#531": true
-  "#527": false
-  "#516": false
+  "#527": 
+  "#516": 

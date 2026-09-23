@@ -116,6 +116,141 @@ class Project(BaseProject):
             raise ValueError(f"'{res}' is not valid, must be 'y' or 'n'")
          
 
+    def define_camera_shift(self):   
+        from skimage.io import imread
+        import numpy as np
+        from skimage.color import rgb2gray
+        from dipy.align.transforms import TranslationTransform2D
+        from dipy.align.imaffine import AffineRegistration
+        from skimage import img_as_ubyte
+
+        print(f"""
+        =============== Define Camera shift ===============
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
+
+
+        output_dir = self.paths.data_root / "camera_shift"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        raw_frames_dir = output_dir / "raw_frames"
+        raw_frames_dir.mkdir(parents=True, exist_ok=True)
+
+        frames_paths = set()
+        frames_paths.update(raw_frames_dir.glob("*.png")) 
+
+        if  len(frames_paths) == 0 : 
+            print("\nExtracting frames\n")
+
+            for trial in self.trialgroup.trials: 
+
+                trial_comb = trial.group + "_" + trial.date.isoformat()
+                output_path = u.make_path(raw_frames_dir, f"{trial_comb}.png")
+
+                if output_path in frames_paths :
+                    continue
+
+                frames_paths.add(output_path)
+                print(trial_comb)
+
+                video = Video(trial.clip_path)
+                video.extract_1_frame(nb= 5, output_path=output_path)
+
+
+        print("\nComputing camera shift\n")
+        ref_path = Path(
+            "/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/raw_frames/"
+            "#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png"
+        )
+
+        superimpose_dir = output_dir / "superimposed"
+        superimpose_dir.mkdir(parents=True, exist_ok=True)
+
+        ref_img = imread(str(ref_path))
+        ref_img = ref_img[450:, :, :]
+
+        shift_config: dict = {"rules":[]}
+
+        for f_path in frames_paths:
+
+            img = imread(str(f_path))
+            img = img[450:, :, :]
+
+            fig, axes = plt.subplots(2, 2, figsize=(8, 4))
+
+            axes[0, 0].imshow(ref_img, cmap="gray")
+            axes[0, 0].set_title("ref img")
+            axes[0, 0].axis("off")
+
+            axes[0, 1].imshow(img, cmap="gray")
+            axes[0, 1].set_title("img")
+            axes[0, 1].axis("off")
+
+            # Red = reference
+            # Green = current frame
+            stereo = np.zeros((62, 512, 3), dtype=np.uint8)
+            stereo[..., 0] = ref_img[..., 0]
+            stereo[..., 1] = img[..., 1]
+
+            axes[1, 0].imshow(stereo)
+            axes[1, 0].set_title("superimposed")
+            axes[1, 0].axis("off")
+
+
+            # shift calculation 
+
+            ref_gray = rgb2gray(ref_img)
+            img_gray = rgb2gray(img)
+
+            affreg = AffineRegistration()
+            transform = TranslationTransform2D()
+            tx = affreg.optimize(ref_gray, img_gray, transform, params0=None)
+
+            shift_matrix = tx.affine
+            dx, dy = shift_matrix[0, 2], shift_matrix[1, 2]
+
+            warped_img = tx.transform(img_gray)   # or apply dx,dy to the color img yourself
+
+            stereo2 = np.zeros((62, 512, 3), dtype=np.uint8)
+            stereo2[..., 0] = ref_img[..., 0]
+            stereo2[..., 1] = img_as_ubyte(np.clip(warped_img, 0, 1))
+
+
+            axes[1, 1].imshow(stereo2)
+            axes[1, 1].set_title(f"shifted (dx={dx:.1f}, dy={dy:.1f})")
+            axes[1, 1].axis("off")
+
+            fig.tight_layout()
+            fig.savefig(superimpose_dir / f_path.name)
+            plt.close(fig)
+
+            # add to shift config
+
+            flip = True if "right" in f_path.stem[5] else False
+            shift_config["rules"].append({
+                "when": {
+                    "date": f_path.stem[-10:],
+                    "group": f_path.stem[:-11]
+                },
+                "value": {
+                    "flip": flip,
+                    "dx": dx.round(3).item(),
+                    "dy": dy.round(3).item()
+                }
+                
+            })
+
+
+        with open(self.config_dir / "rules/camera_shift_rules.yaml", "w") as f: 
+            yaml.safe_dump(shift_config, f) 
+                    
+
+
+
+            
+
+
 
     @process_time
     def init_metadata(self): 
@@ -468,18 +603,22 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        import seaborn as sns
-        import matplotlib.pyplot as plt
+        self.define_camera_shift()
         
-        analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
+        # analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
 
         # self.trialgroup.crop_coords(True)
+        # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / "timeseries_df.csv")
+        # print(self.trialgroup._timeseries_df)
 
-        # self.trialgroup.plot_tendency(
-        #     value="instant_velocity",
-        #     save_as=u.make_path(analysis_dir / "tendency", "instant_velocity.svg")
-        # )
+        # for val in ["instant_velocity", "instant_acc", "lever_distance"]:
+        #     self.trialgroup.plot_tendency(
+        #         value=val,
+        #         save_as=u.make_path(analysis_dir / "tendency", f"{val}.svg")
+        #     )
+        
+        # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / "all_traj.svg")
 
-        self.trialgroup.success_rate_report(u.make_path(analysis_dir, "success_rate.txt"))
+        # self.trialgroup.success_rate_report(u.make_path(analysis_dir, "success_rate.txt"))
         
         
