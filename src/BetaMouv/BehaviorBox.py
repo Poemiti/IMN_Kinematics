@@ -2,12 +2,21 @@ from dataclasses import dataclass
 from matplotlib.patches import Rectangle
 import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
+
 
 class BehaviorBox:
+
+    # BOX DEFINITION 
+    # Ref image : "/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/raw_frames/#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png"
+
+    XL, YL = (55, 230)   # lever position (px)
+    XP, YP = (315, 348)   # pad position (px)
+
     def __init__(self, 
-                xy_lever=(55, 230),
-                xy_pad=(315, 325),
-                view="left",
+                 coords: pd.DataFrame,
+                 time_pad_off: float,
+                 shift: tuple[float] = (0.0, 0.0),
                 frame_width=512,) : 
         """
         Return absolute behavior boxes:
@@ -17,91 +26,114 @@ class BehaviorBox:
         -------
         Dict[boxes: (x_top_left, y_top_left, x_bottom_left, y_bottom_left)]
         """
+        self.dx, self.dy = shift
+
+        self.coords = coords[["x", "y"]] + (self.dx, self.dy) 
         
-        self.xl, self.yl = xy_lever
-        self.xp, self.yp = xy_pad
+        self.xl, self.yl = (self.XL + self.dx, self.YL + self.dy )
+        self.xp, self.yp = (self.XP + self.dx, self.YP + self.dy)
 
         # constants
-        self.lever_right = 40
-        self.lever_upper = 10
-        self.lever_lower = 18
-        self.pad_upper = 25
+        self.lever_right = 40 + self.dx
+        self.lever_upper = 10 + self.dy
+        self.lever_lower = 18 + self.dy
+        self.reach_bottom = self.coords.loc[self.coords["t"] == time_pad_off]["y"]
 
         self.frame_width = frame_width
 
-        if view == "left" :
-            self.boxes = self._build_left_boxes()
-
-        elif view == "right" : 
-            self.boxes = self._build_right_boxes()
-
-        else:
-            raise ValueError("view must be 'left' or 'right'")
+        self.spatial_boxes = self.build_spatial_boxes()
+        self.adjusted_boxes = self.build_adjusted_boxes()
 
 
-    def _build_left_boxes(self): 
+
+    def build_spatial_boxes(self): 
         return {
             "reach": (
                 self.xl + self.lever_right,
-                0,
+                self.frame_width,
                 self.xp,
-                self.yp - self.pad_upper,
+                self.reach_bottom,
                 "yellow"
             ),
             "open": (
                 0,
-                0,
+                self.frame_width,
                 self.xl + self.lever_right,
-                self.yl - self.lever_upper,
+                self.yl + self.lever_upper,
                 "orange"
             ),
             "grasp": (
                 0,
-                self.yl - self.lever_upper,
+                self.yl + self.lever_upper,
                 self.xl + self.lever_right,
-                self.yl + self.lever_lower,
+                self.yl - self.lever_lower,
                 "blue"
-            ),
-
-            "press": (
-                0,
-                self.yl + self.lever_lower,
-                self.xl + self.lever_right,
-                self.yl + int(self.lever_lower * 2.5),
-                "green"
             ),
         }
-    
 
-    def _build_right_boxes(self) : 
+    def bodypart_angle(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
+                               coords: pd.DataFrame | None = None) -> np.ndarray:
+        """Compute the orientation angle (in degrees) of the segment
+        going from bp1 -> bp2, relative to the horizontal axis.
+        """
+        if coords is None:
+            coords = self.coords
+
+        soft_pad = coords[bp1]
+        finger3 = coords[bp2]
+
+        dx = finger3["x"].to_numpy() - soft_pad["x"].to_numpy()
+        dy = finger3["y"].to_numpy() - soft_pad["y"].to_numpy()
+
+        angle = np.degrees(np.arctan2(dy, dx))  # range [-180, 180]
+
+        # remove artificial jumps of 360° when the angle crosses ±180°
+        return np.degrees(np.unwrap(np.radians(angle)))
+    
+    def bodypart_distance(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
+                               coords: pd.DataFrame | None = None) -> np.ndarray: 
+        """Compute the orientation angle (in degrees) of the segment
+        going from bp1 -> bp2, relative to the horizontal axis.
+        """
+        if coords is None:
+            coords = self.coords
+
+        soft_pad = coords[bp1]
+        finger3 = coords[bp2]
+
+        dx = finger3["x"].to_numpy() - soft_pad["x"].to_numpy()
+        dy = finger3["y"].to_numpy() - soft_pad["y"].to_numpy()
+
+        return np.sqrt(dx**2 + dy**2)
+
+
+    def build_adjusted_boxes(self):
+        self.coords["angle"] = self.bodypart_angle()
+        self.coords["softpad_finger_distance"] = self.bodypart_distance()
+
+
+         
         return {
-            "reach": (
+            "reach": (  # does not change
+                self.xl + self.lever_right,
+                self.frame_width,
                 self.xp,
-                0,
-                self.xl - self.lever_right,
-                self.yp - self.pad_upper,
+                self.reach_bottom,
                 "yellow"
             ),
             "open": (
-                self.xl - self.lever_right,
                 0,
                 self.frame_width,
-                self.yl - self.lever_upper,
+                self.xl + self.lever_right,
+                self.yl + self.lever_upper,
                 "orange"
             ),
             "grasp": (
-                self.xl - self.lever_right,
-                self.yl - self.lever_upper,
-                self.frame_width,
-                self.yl + self.lever_lower,
+                0,
+                self.yl + self.lever_upper,
+                self.xl + self.lever_right,
+                self.yl - self.lever_lower,
                 "blue"
-            ),
-            "press": (
-                self.xl - self.lever_right,
-                self.yl + self.lever_lower,
-                self.frame_width,
-                self.yl + int(self.lever_lower * 2.5),
-                "green"
             ),
         }
     

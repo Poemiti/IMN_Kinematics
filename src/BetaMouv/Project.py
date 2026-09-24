@@ -42,6 +42,7 @@ class Project(BaseProject):
         self.clip_duration_rules: dict = self._load_config(self.config_dir / "rules/clip_duration_rules.yaml")
         self.ethology_rules: dict = self._load_config(self.config_dir / "rules/ethology_rules.yaml")
         self.exclusion_rules: dict = self._load_config(self.config_dir / "rules/exclusion_rules.yaml")
+        self.camera_shift_rules: dict = self._load_config(self.config_dir / "rules/camera_shift_rules.yaml")
 
         # setup path
         self.paths: PathConfig = PathConfig(project_name=self.name)
@@ -73,8 +74,7 @@ class Project(BaseProject):
 
             raw_video = Video(video_path=video_path)
 
-            output_dir = self.paths.raw / raw_video.file.subject / raw_video.name
-            output_dir.mkdir(parents=True, exist_ok=True)
+            output_dir = u.make_dir(self.paths.raw / raw_video.file.subject / raw_video.name)
 
             meta = {"month": raw_video.date.month}
             clip_duration = u.match_rule(meta, self.clip_duration_rules)
@@ -117,12 +117,6 @@ class Project(BaseProject):
          
 
     def define_camera_shift(self):   
-        from skimage.io import imread
-        import numpy as np
-        from skimage.color import rgb2gray
-        from dipy.align.transforms import TranslationTransform2D
-        from dipy.align.imaffine import AffineRegistration
-        from skimage import img_as_ubyte
 
         print(f"""
         =============== Define Camera shift ===============
@@ -131,116 +125,47 @@ class Project(BaseProject):
         ==============================================\n""")
 
 
-        output_dir = self.paths.data_root / "camera_shift"
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        raw_frames_dir = output_dir / "raw_frames"
-        raw_frames_dir.mkdir(parents=True, exist_ok=True)
+        output_dir = u.make_dir(self.paths.data_root / "camera_shift")
+        raw_frames_dir = u.make_dir(output_dir / "raw_frames")
+        superimpose_dir = u.make_dir(output_dir / "superimposed")
 
         frames_paths = set()
         frames_paths.update(raw_frames_dir.glob("*.png")) 
 
-        if  len(frames_paths) == 0 : 
-            print("\nExtracting frames\n")
-
-            for trial in self.trialgroup.trials: 
-
-                trial_comb = trial.group + "_" + trial.date.isoformat()
-                output_path = u.make_path(raw_frames_dir, f"{trial_comb}.png")
-
-                if output_path in frames_paths :
-                    continue
-
-                frames_paths.add(output_path)
-                print(trial_comb)
-
-                video = Video(trial.clip_path)
-                video.extract_1_frame(nb= 5, output_path=output_path)
-
-
-        print("\nComputing camera shift\n")
-        ref_path = Path(
-            "/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/raw_frames/"
-            "#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png"
-        )
-
-        superimpose_dir = output_dir / "superimposed"
-        superimpose_dir.mkdir(parents=True, exist_ok=True)
-
-        ref_img = imread(str(ref_path))
-        ref_img = ref_img[450:, :, :]
+        ref_path = Path("/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/raw_frames/#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png")
 
         shift_config: dict = {"rules":[]}
 
-        for f_path in frames_paths:
+        for trial in self.trialgroup.trials: 
 
-            img = imread(str(f_path))
-            img = img[450:, :, :]
+            trial_comb = trial.group + "_" + trial.date.isoformat()
+            output_path = u.make_path(raw_frames_dir, f"{trial_comb}.png")
 
-            fig, axes = plt.subplots(2, 2, figsize=(8, 4))
+            # 1. extract frame (if not already done)
+            if not output_path in frames_paths :
+                frames_paths.add(output_path)
+                print("extracting:", trial_comb)
 
-            axes[0, 0].imshow(ref_img, cmap="gray")
-            axes[0, 0].set_title("ref img")
-            axes[0, 0].axis("off")
+                video = Video(trial.clip_path)
+                video.extractframes(frame_range=[5], output_path=output_path)
+            else : 
+                print("loading:", trial_comb)
 
-            axes[0, 1].imshow(img, cmap="gray")
-            axes[0, 1].set_title("img")
-            axes[0, 1].axis("off")
-
-            # Red = reference
-            # Green = current frame
-            stereo = np.zeros((62, 512, 3), dtype=np.uint8)
-            stereo[..., 0] = ref_img[..., 0]
-            stereo[..., 1] = img[..., 1]
-
-            axes[1, 0].imshow(stereo)
-            axes[1, 0].set_title("superimposed")
-            axes[1, 0].axis("off")
-
-
-            # shift calculation 
-
-            ref_gray = rgb2gray(ref_img)
-            img_gray = rgb2gray(img)
-
-            affreg = AffineRegistration()
-            transform = TranslationTransform2D()
-            tx = affreg.optimize(ref_gray, img_gray, transform, params0=None)
-
-            shift_matrix = tx.affine
-            dx, dy = shift_matrix[0, 2], shift_matrix[1, 2]
-
-            warped_img = tx.transform(img_gray)   # or apply dx,dy to the color img yourself
-
-            stereo2 = np.zeros((62, 512, 3), dtype=np.uint8)
-            stereo2[..., 0] = ref_img[..., 0]
-            stereo2[..., 1] = img_as_ubyte(np.clip(warped_img, 0, 1))
-
-
-            axes[1, 1].imshow(stereo2)
-            axes[1, 1].set_title(f"shifted (dx={dx:.1f}, dy={dy:.1f})")
-            axes[1, 1].axis("off")
-
-            fig.tight_layout()
-            fig.savefig(superimpose_dir / f_path.name)
-            plt.close(fig)
-
-            # add to shift config
-
-            flip = True if "right" in f_path.stem[5] else False
+            # 2. compute camera shift
+            dx, dy = video.compute_camera_shift(ref_path=ref_path, 
+                                        save_as=superimpose_dir / f"{trial_comb}.png")
             shift_config["rules"].append({
-                "when": {
-                    "date": f_path.stem[-10:],
-                    "group": f_path.stem[:-11]
-                },
-                "value": {
-                    "flip": flip,
-                    "dx": dx.round(3).item(),
-                    "dy": dy.round(3).item()
-                }
-                
-            })
-
+                            "when": {
+                                "date": trial.date.isoformat(),
+                                "group": trial.group
+                            },
+                            "value": {
+                                "flip": trial.camera_view == "right",
+                                "dx": dx.round(3).item(),
+                                "dy": dy.round(3).item()
+                            }
+                            
+                        })
 
         with open(self.config_dir / "rules/camera_shift_rules.yaml", "w") as f: 
             yaml.safe_dump(shift_config, f) 
@@ -290,23 +215,14 @@ class Project(BaseProject):
                 # print(f"Camera: {trial.camera_view} | cue: {leds.cue_type} ! Not compatible\n")
                 continue
 
-            # get lever_position
-            etho_meta = {
-                "rat": int(trial.subject[1:]),
-                "day": trial.file.date.day,
-                "condition": trial.condition,
-                "view": trial.camera_view,
-                "month": trial.file.date.month,
+            # get camera shift info
+            shift_meta = {
+                "date": trial.date,
+                "group": trial.group,
             }
 
-            anchors_position = u.match_rule(etho_meta, self.ethology_rules)
-            Boxes = BehaviorBox(xy_lever=anchors_position["lever"],
-                            xy_pad=anchors_position["pad"],
-                            view=trial.camera_view,
-                            frame_width=trial.frame_width_px)
-
-            trial.update(behaviorBox=Boxes,
-                        lever_position=anchors_position["lever"])
+            shift = u.match_rule(shift_meta, self.camera_shift_rules)
+            trial.update(camera_shift=shift)
 
             trial.set_led_info(leds)
             trial.set_task_success(self.project_info["laser_on_duration"])
@@ -348,23 +264,14 @@ class Project(BaseProject):
         
             updated_trial = Trial(previous_trial.clip_path)
 
-            # get lever_position
-            etho_meta = {
-                "rat": int(previous_trial.subject[1:]),
-                "day": previous_trial.file.date.day,
-                "condition": previous_trial.condition,
-                "view": previous_trial.camera_view,
-                "month": previous_trial.file.date.month,
+            # get camera shift info
+            shift_meta = {
+                "date": previous_trial.date,
+                "group": previous_trial.group,
             }
 
-            anchors_position = u.match_rule(etho_meta, self.ethology_rules)
-            Boxes = BehaviorBox(xy_lever=anchors_position["lever"],
-                            xy_pad=anchors_position["pad"],
-                            view=previous_trial.camera_view,
-                            frame_width=previous_trial.frame_width_px)
-
-            updated_trial.update(behaviorBox=Boxes,
-                        lever_position=anchors_position["lever"])
+            shift = u.match_rule(shift_meta, self.camera_shift_rules)
+            updated_trial.update(camera_shift=shift)
 
             # get leds info
             updated_trial.update(
@@ -409,7 +316,7 @@ class Project(BaseProject):
 
             # prediction 
             trial.dlc_predict(model_path=self.paths.model,
-                              output_csv_path=trial.clip_path.parent / f"{trial.name}.csv")
+                              output_csv_path=trial.clip_path.parent / f"pred_results_{trial.stem}.csv")
 
             break
 
@@ -425,14 +332,12 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
         
-        preprocess_dir = self.paths.results_root / "preprocess"
-        preprocess_dir.mkdir(parents=True, exist_ok=True)
+        preprocess_dir = u.make_dir(self.paths.results_root / "preprocess")
         preprocess_data_path = preprocess_dir / "preprocess_data.csv"
         outlier_fig_path = preprocess_dir / "outlier_distri.png"
 
-        interpolation_dir = preprocess_dir / "interpolation"
+        interpolation_dir = u.make_dir(preprocess_dir / "interpolation")
         shutil.rmtree(interpolation_dir, ignore_errors=False)
-        interpolation_dir.mkdir(parents=True, exist_ok=True)
         
         preprocess_data = {
             "trial": [],
@@ -581,12 +486,18 @@ class Project(BaseProject):
             if not trial._is_successful():    
                 continue
 
+            Boxes = BehaviorBox(coords=trial.coords,
+                                time_pad_off=trial.time_pad_off,
+                                shift=trial.camera_shift,)
+            
+
             coords = trial.traj.compute_instant_metrics(trial.coords)
             coords = trial.behaviorBox.classify_trajectory(coords)
             ## TODO
             # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
              
-            trial.update(coords=coords)
+            trial.update(coords=coords,
+                         behaviorBox=Boxes)
 
         self.trialgroup.save(self.paths.trials_metadata)
 
@@ -603,9 +514,16 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        self.define_camera_shift()
+        # self.define_camera_shift()
         
-        # analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
+        analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
+
+        trial = self.trialgroup.trials[0]
+        vid = Video(trial.clip_path)
+        vid.annotate_video(output_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",)
+        vid.extract_frames(frame_range=range(0, 150), 
+                           video_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",
+                           output_base=u.make_path(self.paths.data_root / "annotated_vid" , "frame"))
 
         # self.trialgroup.crop_coords(True)
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / "timeseries_df.csv")

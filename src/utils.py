@@ -21,9 +21,14 @@ def match_rule(meta, rules):
 
 
 
-def make_path(base_dir, file_name) ->  Path:
+def make_path(base_dir: Path, file_name: str) ->  Path:
     base_dir.mkdir(parents=True, exist_ok=True)
     return base_dir / file_name
+
+
+def make_dir(dir: Path) -> Path: 
+    dir.mkdir(parent=True, exist_ok=True)
+    return dir
 
 
 

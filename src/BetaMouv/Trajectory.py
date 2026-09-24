@@ -371,3 +371,4 @@ class Trajectory(BaseTrajectory):
         fig.savefig(save_as)
         plt.close()
 
+

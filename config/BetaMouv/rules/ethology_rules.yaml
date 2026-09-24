@@ -29,7 +29,7 @@ rules:
       rat: 531
       month: 5
       view: left
-    value: {lever: [80, 210], pad: [353, 335]}	
+    value: {lever: [80, 210], pad: [353, 335]}
 
   - when:
       rat: 525
@@ -96,5 +96,3 @@ rules:
       month: 5
       view: right
     value: {lever: [445, 210], pad: [175, 335]}
-
-    

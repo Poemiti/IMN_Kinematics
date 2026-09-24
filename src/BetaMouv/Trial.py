@@ -31,7 +31,8 @@ class Trial(BaseTrial):
         # computed after prediction and metadata_building
         "pred_path", "lever_position", "behaviorBox",
         "validation_success", "validation_success_reason", "traj", 
-        "coords", "coords_success", "coords_success_reason"
+        "coords", "coords_success", "coords_success_reason",
+        "camera_shift"
     )
 
 
@@ -70,7 +71,6 @@ class Trial(BaseTrial):
         self.time_laser_on: float = None
         self.time_reward: float = None
         self.group: str = None
-        self.behaviorBox: BehaviorBox = None
 
         # set after prediction
         self.pred_path: str = None
@@ -85,6 +85,8 @@ class Trial(BaseTrial):
         self.validation_success_reason: str = "unknown"
 
         self.traj: Trajectory = None
+        self.behaviorBox: BehaviorBox = None
+        self.camera_shift: tuple[float] = None
 
     def identity(self) -> dict:
         return {f: getattr(self, f, None) for f in self.IDENTITY_FIELDS}
