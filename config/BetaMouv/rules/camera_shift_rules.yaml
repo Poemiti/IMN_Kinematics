@@ -1,0 +1,358 @@
+rules:
+- value:
+    dx: -0.547
+    dy: -0.444
+    flip: false
+  when:
+    date: '2024-07-11'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: 7.348
+    dy: 18.378
+    flip: false
+  when:
+    date: '2024-05-27'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.507
+    dy: -1.414
+    flip: false
+  when:
+    date: '2024-06-20'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -1.052
+    dy: -0.606
+    flip: false
+  when:
+    date: '2024-07-12'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: -18.833
+    dy: 22.388
+    flip: false
+  when:
+    date: '2024-05-26'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -0.814
+    dy: -1.385
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -0.004
+    dy: 0.006
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: -0.177
+    dy: -0.212
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: 0.841
+    dy: -1.092
+    flip: false
+  when:
+    date: '2024-07-02'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -0.875
+    dy: -1.53
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -18.247
+    dy: 22.556
+    flip: false
+  when:
+    date: '2024-05-26'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.262
+    dy: -1.475
+    flip: false
+  when:
+    date: '2024-06-24'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.99
+    dy: -1.853
+    flip: false
+  when:
+    date: '2024-06-21'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.304
+    dy: -1.586
+    flip: false
+  when:
+    date: '2024-06-24'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -0.918
+    dy: -1.538
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.117
+    dy: -2.063
+    flip: false
+  when:
+    date: '2024-06-25'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -0.568
+    dy: -0.456
+    flip: false
+  when:
+    date: '2024-07-11'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: -1.086
+    dy: -0.593
+    flip: false
+  when:
+    date: '2024-07-12'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: 8.55
+    dy: 3.348
+    flip: false
+  when:
+    date: '2024-05-26'
+    group: '#517_CHR_CONTRA_NOstim_RightHemi_leftView_incompatible_LaserOff'
+- value:
+    dx: -18.808
+    dy: 22.413
+    flip: false
+  when:
+    date: '2024-05-26'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -0.015
+    dy: -0.155
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: 0.953
+    dy: -0.832
+    flip: false
+  when:
+    date: '2024-07-02'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -0.711
+    dy: -1.996
+    flip: false
+  when:
+    date: '2024-06-25'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -0.87
+    dy: -1.381
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.0
+    dy: -1.634
+    flip: false
+  when:
+    date: '2024-06-21'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.095
+    dy: -1.194
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -0.861
+    dy: -1.939
+    flip: false
+  when:
+    date: '2024-06-25'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: 0.021
+    dy: 0.029
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: -0.182
+    dy: -0.17
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: -0.034
+    dy: -0.167
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: -0.767
+    dy: -1.681
+    flip: false
+  when:
+    date: '2024-06-21'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: 0.978
+    dy: -1.048
+    flip: false
+  when:
+    date: '2024-07-02'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: 0.202
+    dy: -0.084
+    flip: false
+  when:
+    date: '2024-07-11'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: -1.284
+    dy: -1.49
+    flip: false
+  when:
+    date: '2024-06-24'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: 4.336
+    dy: 9.5
+    flip: false
+  when:
+    date: '2024-05-27'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -1.167
+    dy: -1.398
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: 0.286
+    dy: -0.248
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: -0.975
+    dy: -1.672
+    flip: false
+  when:
+    date: '2024-06-21'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -1.133
+    dy: -2.086
+    flip: false
+  when:
+    date: '2024-06-25'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -0.671
+    dy: -0.354
+    flip: false
+  when:
+    date: '2024-07-12'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: 0.941
+    dy: -0.834
+    flip: false
+  when:
+    date: '2024-07-02'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -1.086
+    dy: -1.176
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -0.71
+    dy: -0.38
+    flip: false
+  when:
+    date: '2024-07-12'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: -18.206
+    dy: 22.558
+    flip: false
+  when:
+    date: '2024-05-26'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: 23.35
+    dy: 29.385
+    flip: false
+  when:
+    date: '2024-05-27'
+    group: '#517_CHR_CONTRA_NOstim_RightHemi_leftView_incompatible_LaserOff'
+- value:
+    dx: -1.276
+    dy: -1.587
+    flip: false
+  when:
+    date: '2024-06-24'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: 0.262
+    dy: -0.13
+    flip: false
+  when:
+    date: '2024-07-11'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff'
+- value:
+    dx: 0.284
+    dy: -0.251
+    flip: false
+  when:
+    date: '2024-07-05'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_high_LaserOn'
+- value:
+    dx: -0.748
+    dy: -1.682
+    flip: false
+  when:
+    date: '2024-06-21'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -1.165
+    dy: -1.417
+    flip: false
+  when:
+    date: '2024-06-26'
+    group: '#531_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -1.524
+    dy: -1.454
+    flip: false
+  when:
+    date: '2024-06-20'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOff'
