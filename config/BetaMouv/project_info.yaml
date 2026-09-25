@@ -6,4 +6,4 @@ laser_on_duration: 0.325  # sec (0.3 of laser + 0.025 from pad_off to laser stim
 gap_scale: 0.15 # for outlier detection
 distance_thresh: 0.6 # for outlier detection (cm)
 max_outlier: 10 
-
+lever_position: [55, 230]

@@ -21,7 +21,7 @@ sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
 class Trajectory(BaseTrajectory): 
 
     file_cls = File 
-    STAGE = ("outlier", "validation")
+    STAGES = ("outlier", "validation")
 
 
     ################## Trajectory filtration method ###############
@@ -31,7 +31,10 @@ class Trajectory(BaseTrajectory):
         super().__init__(coords_path, view, bodypart, fps, frame_width, frame_height, cm_per_pixel, lever_position)
 
         self.interpolated_coords = None
+        self.clean_coords = None
 
+    def apply_shift(self, shift: dict): 
+        self.coords = self.coords + shift[["dx", "dy"]]
 
     @staticmethod
     def _define_likelihood_threshold(coords: pd.DataFrame, thresh: float, percentile: float = None) -> float : 
@@ -268,9 +271,9 @@ class Trajectory(BaseTrajectory):
 
     def plot_preprocess(self, 
                         interpolated_coords, 
-                        # likelihood_filtered_coords,
                         outlier_filtered_coords,
                         raw_coords,
+                        nb_outlier,
                         time_pad_off,
                         title, 
                         save_as):
@@ -316,7 +319,6 @@ class Trajectory(BaseTrajectory):
         ax_traj = fig.add_subplot(gs[:,1])    # trajectory spans both rows
 
         _plot_xy([ax_xt, ax_yt], interpolated_coords, 4*offset,"#0570b0", "|", "3.interpolate")
-        # _plot_xy([ax_xt, ax_yt], likelihood_filtered_coords, 2*offset,"#74a9cf", "|", "2.likelihood")
         _plot_xy([ax_xt, ax_yt], outlier_filtered_coords, 2*offset, "#bdc9e1","|", "1.outlier")
         _plot_xy([ax_xt, ax_yt], raw_coords, 0*offset, "#d1cbdc","|", "0.raw", time_pad_off)
 
@@ -330,27 +332,13 @@ class Trajectory(BaseTrajectory):
         ax_dist.axhline(y=0.55, linestyle="--", color="red", label="threshold", lw=0.5)
         ax_dist.axvline(x=time_pad_off, linestyle="--", color="k", label="pad_off", lw=0.5)
         
-        # pad_off_frame = int((time_pad_off - 0.1)* 125)
-        # pad_off_frame = pad_off_frame if pad_off_frame >=0 else 0
-        # off_frame = int((time_pad_off + 0.4) * 125)
-        
-        # _plot_traj(raw_coords[pad_off_frame : off_frame], 0*offset, "1.raw", "#d1cbdc", ax_traj)
-        # _plot_traj(outlier_filtered_coords[pad_off_frame : off_frame], 0*offset, "2.outlier", "#bdc9e1" ,ax_traj, "")
-        # _plot_traj(likelihood_filtered_coords[pad_off_frame : off_frame], 0*offset, "3.likelihood", "#74a9cf" ,ax_traj, "")
-        # _plot_traj(interpolated_coords[pad_off_frame : off_frame], 0*offset, "4.interpolate", "#0570b0" ,ax_traj, "|")
-
         _plot_traj(raw_coords, 0*offset, "1.raw", "#d1cbdc", ax_traj)
         _plot_traj(outlier_filtered_coords, 0*offset, "2.outlier", "#bdc9e1" ,ax_traj, "")
         _plot_traj(interpolated_coords, 0*offset, "4.interpolate", "#0570b0" ,ax_traj, "|")
 
+        ax_xt.set(ylabel=("x (cm)"),)
 
-        ax_xt.set(
-            ylabel=("x (cm)"),
-            )
-
-        ax_yt.set(
-            ylabel=("y (cm)"),
-            )
+        ax_yt.set(ylabel=("y (cm)"),)
 
         ax_dist.set(
             ylabel=("distance (cm)"),
@@ -366,6 +354,7 @@ class Trajectory(BaseTrajectory):
         ax_traj.legend()
 
         title = title[:len(title)//2] + "\n" + title[len(title)//2:]
+        title = title + f" - n_outlier={nb_outlier}"
         fig.suptitle(title, wrap=True)
 
         plt.tight_layout()

@@ -14,7 +14,7 @@ class Trajectory:
     """A trajectory is defined in a classical cartesian plane, in cm"""
 
     file_cls = BaseFile
-    STAGE = ()
+    STAGES = ()
 
     def __init__(self,
                 coords_path: Path,
@@ -48,7 +48,6 @@ class Trajectory:
         # setup coordinates into cartesian plane (bottom-left origin) + cm units
         self.coords = self._array_to_scaled_cartesian(self.raw_coords)
         self.lever_position = self._point_to_scaled_cartesian(*lever_position) if lever_position else None
-
 
     ############## Success function #############
 

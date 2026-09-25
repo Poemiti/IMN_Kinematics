@@ -85,7 +85,7 @@ class Trial:
         return all(o.success for o in self.trial_outcomes.values() if o.order <= limit)
 
     def failure(self) -> Outcome | None:
-        for outcome in sorted(self.stage_outcomes.values()):
+        for outcome in sorted(self.trial_outcomes.values()):
             if not outcome.success:
                 return outcome
         return None

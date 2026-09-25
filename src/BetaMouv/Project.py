@@ -262,7 +262,8 @@ class Project(BaseProject):
             updated_trial = Trial(previous_trial.clip_path)
             clip = Video(previous_trial.clip_path)
 
-            if not clip.is_openable or not clip.is_readable: 
+            # if not clip.is_openable or not clip.is_readable:
+            if not previous_trial.trial_outcomes["clip_openable"].success:  
                 updated_trial.set_success(stage="clip_openable", success=False, reason="Clip not readable")
                 updated_trial.set_success(stage="view_match_task", success=False, reason="Clip not readable")
                 updated_trial.set_success(stage="task", success=False, reason="Clip not readable")
@@ -276,7 +277,7 @@ class Project(BaseProject):
 
             # get camera shift info
             shift_meta = {
-                "date": previous_trial.date,
+                "date": previous_trial.date.isoformat(),
                 "group": previous_trial.group,
             }
 
@@ -357,18 +358,16 @@ class Project(BaseProject):
         u.make_dir(interpolation_dir)                          # then (re)create
 
         MAX_OUTLIER = self.project_info["max_outlier"]
-        ACCEPT_THRESHOLD = self.project_info["auto_accept_outlier"]  # rename to match config; was hardcoded 3
         DIST_THRESH = self.project_info["distance_thresh"]
-        GAP = self.project_info["gap"]
+        GAP = self.project_info["gap_scale"]
         BODYPARTS = self.project_info["bodyparts"]
+        LEVER_POS = self.project_info["lever_position"]
 
         preprocess_records = []
-        n_skipped_invalid = 0
 
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
 
             if not trial.is_valid():
-                n_skipped_invalid += 1
                 continue
 
             for bodypart in BODYPARTS: 
@@ -378,8 +377,9 @@ class Project(BaseProject):
                     view=trial.camera_view,
                     bodypart="finger_3",
                     cm_per_pixel=trial.cm_per_pixel,
-                    lever_position=trial.lever_position,
+                    lever_position=LEVER_POS,
                 )
+                traj.apply_shift(trial.camera_shift)
 
                 raw_coords = traj.compute_instant_metrics(traj.coords)
                 raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
@@ -396,31 +396,35 @@ class Project(BaseProject):
                 preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_raw_outliers, "type": "raw"})
                 preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_interpolated_outliers, "type": "interpolated"})
 
-                # --- decide the outlier stage outcome ---
+                # set outlier stage outcome 
+
                 if n_interpolated_outliers == 0:
-                    traj.set_stage("outlier", success=True, reason=f"Accepted, 0 outliers found")
+                    traj.set_success("outlier", success=True, reason=f"0 outliers found")
+                    traj.clean_coords = traj.coords
+
                 elif n_interpolated_outliers >= MAX_OUTLIER:
-                    traj.set_stage("outlier", success=False, reason=f"Rejected, {n_interpolated_outliers}>={ACCEPT_THRESHOLD}")
-                    traj.set_stage("validation", success=False, reason=f"Rejected, {n_interpolated_outliers}>={ACCEPT_THRESHOLD}")
+                    traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER}")
+                    traj.set_success("validation", success=False, reason=f"outliers >= {MAX_OUTLIER}")
+                
                 else:
-                    traj.set_stage("outlier", success=False, reason=f"Rejected, {n_interpolated_outliers}<{ACCEPT_THRESHOLD} (need validation)")
+                    traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER} need validation")
                     traj.plot_preprocess(
                                         interpolated_coords=traj.interpolated_coords,
                                         outlier_filtered_coords=outlier_filtered_coords,
                                         raw_coords=raw_coords,
                                         time_pad_off=trial.time_pad_off,
                                         title=trial.name,
-                                        save_as=interpolation_dir / f"{bodypart}_{trial.name}.png",
+                                        save_as=interpolation_dir / f"interpolation_{bodypart}_{trial.name}.png",
                                     )
                     
                 trial.trajectories[bodypart] = traj
 
-            outlier_df = pd.DataFrame(preprocess_records)
-            outlier_df.to_csv(preprocess_data_path)
+        outlier_df = pd.DataFrame(preprocess_records)
+        outlier_df.to_csv(preprocess_data_path)
 
-            self.trialgroup.save(self.paths.trials_metadata)
-            self.trialgroup.distri_outlier(data=outlier_df, save_as=outlier_fig_path)
-            self.trialgroup.lineplot_all_traj(save_as=preprocess_dir / f"{bodypart}_traj.png")
+        self.trialgroup.save(self.paths.trials_metadata)
+        # self.trialgroup.distri_outlier(data=outlier_df, save_as=outlier_fig_path)
+        # self.trialgroup.lineplot_all_traj(save_as=preprocess_dir / f"{bodypart}_traj.png")
 
 
     @process_time
@@ -430,35 +434,35 @@ class Project(BaseProject):
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
+
+        BODYPARTS = self.project_info["bodyparts"]
         
         preprocess_dir = self.paths.results_root / "preprocess" / "interpolation"
         print("\n-->", len(list(preprocess_dir.iterdir())), "FILES TO VALIDATE")
         trial_states = Validator.load_preprocess_validator(preprocess_dir)
 
         for trial in tqdm(self.trialgroup.trials, desc="Saving validation"):
-            state = trial_states.get(trial.name)
-
-            if not trial.task_success:
-                trial.update(validation_success=False, 
-                            validation_success_reason="Task failed, skipped")
+            if not trial.is_valid(): 
                 continue
 
-            if not state:
-                trial.update(validation_success=True, 
-                            validation_success_reason="Successful, no validation needed")
-                continue
+            for bodypart in BODYPARTS: 
 
-            if state == "rejected":
-                trial.update(validation_success=False, 
-                             validation_success_reason="Manually rejected")
-            elif state == "raw":
-                trial.update(validation_success=True, 
-                             validation_success_reason="Raw coordinates", 
-                             coords=trial.traj.coords)
-            else:
-                trial.update(validation_success=True, 
-                             validation_success_reason="Interpolated coordinates",
-                            coords=trial.traj.interpolated_coords)
+                state = trial_states.get(f"{bodypart}_{trial.name}")
+
+                if not state:
+                    continue
+
+                traj: Trajectory = trial.trajectories.get(bodypart)
+
+                if state == "rejected":
+                    traj.set_success(stage="validation", success=False, reason="manually rejected")
+ 
+                elif state == "raw":
+                    traj.set_success(stage="validation", success=True, reason="manually accepted, raw")
+                    traj.clean_coords = traj.coords
+                else:
+                    traj.set_success(stage="validation", success=True, reason="manually accepted, interpolated")
+                    traj.clean_coords = traj.interpolated_coords
 
         self.trialgroup.save(self.paths.trials_metadata)
 
@@ -471,31 +475,33 @@ class Project(BaseProject):
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
-        
+
+        BODYPARTS = self.project_info["bodyparts"]        
         preprocess_dir = self.paths.results_root / "preprocess"
 
         for trial in tqdm(self.trialgroup.trials, desc="Computing metrics"):
-            if not trial._is_successful():    
+            if not trial.is_valid():    
                 continue
 
-            Boxes = BehaviorBox(coords=trial.coords,
-                                time_pad_off=trial.time_pad_off,
-                                shift=trial.camera_shift,)
-            
+            for bodypart in BODYPARTS: 
 
-            coords = trial.traj.compute_instant_metrics(trial.coords)
-            coords = trial.behaviorBox.classify_trajectory(coords)
-            ## TODO
-            # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
-             
-            trial.update(coords=coords,
-                         behaviorBox=Boxes)
+                traj = trial.trajectories.get(bodypart)
+                
+                if not traj.is_valid(): 
+                    continue
 
-        self.trialgroup.save(self.paths.trials_metadata)
+                Boxes = BehaviorBox(coords=trial.coords,
+                                    time_pad_off=trial.time_pad_off,
+                                    shift=trial.camera_shift,)
+                
+                coords = trial.traj.compute_instant_metrics(trial.coords)
+                coords = trial.behaviorBox.classify_trajectory(coords)
+                ## TODO
+                # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
+                
+                trial.update(behaviorBox=Boxes)
 
-
-
-            
+            self.trialgroup.save(self.paths.trials_metadata)
 
 
     @process_time 

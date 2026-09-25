@@ -111,7 +111,7 @@ class BehaviorBox:
         self.coords["angle"] = self.bodypart_angle()
         self.coords["softpad_finger_distance"] = self.bodypart_distance()
 
-
+        
          
         return {
             "reach": (  # does not change

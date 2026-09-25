@@ -35,6 +35,13 @@ rules:
     date: '2024-06-21'
     group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
 - value:
+    dx: -0.747
+    dy: -1.679
+    flip: false
+  when:
+    date: '2024-06-20'
+    group: '#517_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
     dx: -17.859
     dy: 21.721
     flip: false
@@ -231,6 +238,13 @@ rules:
     date: '2024-06-26'
     group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
 - value:
+    dx: -1.093
+    dy: -1.189
+    flip: false
+  when:
+    date: '2024-06-21'
+    group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
     dx: 0.839
     dy: -1.11
     flip: false
@@ -244,6 +258,20 @@ rules:
   when:
     date: '2024-06-25'
     group: '#531_CHR_CONTRA_Beta_RightHemi_leftView_low_LaserOff'
+- value:
+    dx: -0.26
+    dy: 16.375
+    flip: false
+  when:
+    date: '2024-05-20'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
+- value:
+    dx: -0.26
+    dy: 16.375
+    flip: false
+  when:
+    date: '2024-05-21'
+    group: '#517_CHR_CONTRA_Conti_RightHemi_leftView_low_LaserOn'
 - value:
     dx: -0.26
     dy: 16.375
