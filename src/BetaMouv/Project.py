@@ -116,7 +116,8 @@ class Project(BaseProject):
             raise ValueError(f"'{res}' is not valid, must be 'y' or 'n'")
          
 
-    def define_camera_shift(self):   
+    def define_camera_shift(self):  
+        # TODO MAKE IT BETTER LOL 
 
         print(f"""
         =============== Define Camera shift ===============
@@ -168,11 +169,6 @@ class Project(BaseProject):
         with open(self.config_dir / "rules/camera_shift_rules.yaml", "w") as f: 
             yaml.safe_dump(shift_config, f) 
                     
-
-
-
-            
-
 
 
     @process_time
@@ -255,14 +251,6 @@ class Project(BaseProject):
         print(f"\nTotal trials processed: {n_trial}")
 
 
-        # print("\nVisualisation of the proportion of each experimental condition\n")
-
-        # TODO
-        # refaire la fonction de metadata report pour afficher le nombre
-        # d'essai par groupe
-        # u.metadata_report(...)
-
-
     @process_time   
     def update_metadata(self): 
         """Update every metadata of each trial EXEPT the LEDs info"""
@@ -306,9 +294,9 @@ class Project(BaseProject):
 
             if (previous_trial.camera_view == "left" and previous_trial.cue_type == "CueL2") or \
                 (previous_trial.camera_view == "right" and previous_trial.cue_type == "CueL1") : 
-                updated_trial.set_success(stage="view_match_task", success=False, reason=f"'{updated_trial.camera_view}' not compatible with '{updated_trial.cue_type}'")
+                updated_trial.set_success(stage="view_match_task", success=False, reason=f"'{updated_trial.camera_view}' X '{updated_trial.cue_type}'")
             else: 
-                updated_trial.set_success(stage="view_match_task", success=True, reason=f"Compatible view with task")
+                updated_trial.set_success(stage="view_match_task", success=True, reason=f"Compatible view X task")
 
 
             updated_trial.set_task_success(self.project_info["laser_on_duration"])

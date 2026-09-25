@@ -13,6 +13,9 @@ import numpy as np
 custom_params = {"axes.spines.right": False, "axes.spines.top": False}
 sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
 
+BOOL_PALETTE = {True: "yellowgreen", False: "tomato"}
+
+
 LASER_STATE_PALETTE = {
     "NOstim": "slategray",
     "LaserOff" :"slategray",
@@ -159,18 +162,19 @@ class TrialGroup(BaseTrialGroup):
         """Display success rate and failure reasons per stage, and save the report."""
 
         df = self.success_df()
-        df.to_csv("fjohfzue.csv")
 
         g = sns.catplot(
             data=df, kind="count",
-            x="success",
-            col="stage", hue="success",
+            x="reason",
+            col="stage", hue="success", palette=BOOL_PALETTE,
             sharex=False,
         )
-        g.set_axis_labels("Success", "Number of trials")
+        
+        g.set_xticklabels(rotation=45, ha="right")
+        g.set_axis_labels("", "Number of trials")
         g.set_titles(col_template="{col_name}")
         g.figure.suptitle("Trial success rate by stage")
-        g.figure.subplots_adjust(top=0.88)
+        g.figure.subplots_adjust(top=0.80)
 
         # annotate each bar with its % of that stage's total trial count
         for stage, ax in zip(g.col_names, g.axes.flat):
@@ -198,7 +202,8 @@ class TrialGroup(BaseTrialGroup):
 
         print(f"Report saved to: {save_as}")
 
-        return 
+        
+
 
     def lineplot_all_traj(self, save_as):
         data = self._timeseries_df
