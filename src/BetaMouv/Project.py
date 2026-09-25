@@ -187,16 +187,18 @@ class Project(BaseProject):
         for clip_path in dataset["filename"].iloc[:]:
 
             clip = Video(clip_path)
+            trial = Trial(clip_path=clip_path)
+
             print("\nBuilding metadata:", clip.path.stem)
 
             if not clip.is_openable or not clip.is_readable: 
+                trial.set_success(stage="clip_openable", success=False, reason="Clip not openable or readable")
                 continue
 
-            if (clip.path.parent / f"{clip.path.stem}.yaml").exists(): 
-                print("Metadata already builded !")
-                continue
+            # if (clip.path.parent / f"{clip.path.stem}.yaml").exists(): 
+            #     print("Metadata already builded !")
+            #     continue
 
-            trial = Trial(clip_path=clip_path)
 
             # get annotation number
             annotation_meta = {
@@ -212,7 +214,7 @@ class Project(BaseProject):
 
             if (trial.camera_view == "left" and leds.cue_type == "CueL2") or \
                (trial.camera_view == "right" and leds.cue_type == "CueL1") : 
-                # print(f"Camera: {trial.camera_view} | cue: {leds.cue_type} ! Not compatible\n")
+                trial.set_success(stage="view_match_task", success=False, reason=f"'{trial.camera_view}' not compatible with '{leds.cue_type}'")
                 continue
 
             # get camera shift info
@@ -261,6 +263,9 @@ class Project(BaseProject):
         updated_trials = []
 
         for previous_trial in tqdm(self.trialgroup.trials, desc="Metadata update"): 
+
+            if not previous_trial.is_valid(): 
+                continue
         
             updated_trial = Trial(previous_trial.clip_path)
 
@@ -306,7 +311,7 @@ class Project(BaseProject):
         ==============================================\n""")
 
         for trial in tqdm(self.trialgroup.trials, desc="Prediction"):
-            if not trial._is_successful(): 
+            if not trial.is_valid(): 
                 continue
 
             if "FIBER_BROKEN" in trial.name:        # for the rat 521
@@ -325,110 +330,84 @@ class Project(BaseProject):
             
     @process_time  
     def run_preprocessing(self):
-
         print(f"""
         =============== Preprocessing =================
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
-        
         preprocess_dir = u.make_dir(self.paths.results_root / "preprocess")
         preprocess_data_path = preprocess_dir / "preprocess_data.csv"
         outlier_fig_path = preprocess_dir / "outlier_distri.png"
 
-        interpolation_dir = u.make_dir(preprocess_dir / "interpolation")
-        shutil.rmtree(interpolation_dir, ignore_errors=False)
-        
-        preprocess_data = {
-            "trial": [],
-            "n_outlier": [],
-            "type": [],
-            "accepted": []
-        }
+        interpolation_dir = preprocess_dir / "interpolation"
+        shutil.rmtree(interpolation_dir, ignore_errors=True)   # clear stale figures first
+        u.make_dir(interpolation_dir)                          # then (re)create
 
         MAX_OUTLIER = self.project_info["max_outlier"]
+        ACCEPT_THRESHOLD = self.project_info["auto_accept_outlier"]  # rename to match config; was hardcoded 3
+        DIST_THRESH = self.project_info["distance_thresh"]
+        GAP = self.project_info["gap"]
+        BODYPARTS = self.project_info["bodyparts"]
+
+        preprocess_records = []
+        n_skipped_invalid = 0
 
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
 
-            if not trial.task_success:
-                trial.update(coords_success_reason="Task failed, skipped")
+            if not trial.is_valid():
+                n_skipped_invalid += 1
                 continue
 
-            traj = Trajectory(
-                coords_path=trial.pred_path,
-                view=trial.camera_view,
-                cm_per_pixel=trial.cm_per_pixel, 
-                lever_position=trial.lever_position,
-            )
+            for bodypart in BODYPARTS: 
 
-            raw_coords = traj.coords
-            raw_coords = traj.compute_instant_metrics(raw_coords)
-            raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, 
-                                                                    threshold=self.project_info["distance_thresh"], gap_scale=self.project_info["gap"])
-
-            outlier_coords = traj.filter_outliers(coords=raw_coords, method="eucli_anchored", 
-                                                  gap_scale=self.project_info["gap"])
-
-            traj.interpolated_coords = traj.interpolate_data(coords=outlier_coords, method="spline", max_gap=5)
-            traj.interpolated_coords = traj.compute_instant_metrics(traj.interpolated_coords)
-            interpolated_outlier_mask = traj.outlier_euclidian_dist_anchored(traj.interpolated_coords, 
-                                                                             threshold=self.project_info["distance_thresh"], gap_scale=self.project_info["gap"])
-
-            n_raw_outliers = len([o for o in raw_outlier_mask if o==True])
-            n_interpolated_outliers = len([o for o in interpolated_outlier_mask if o==True])
-            traj_accepted = n_raw_outliers <= 3 
-
-            preprocess_data["trial"].append(trial.name)
-            preprocess_data["n_outlier"].append(n_raw_outliers)
-            preprocess_data["type"].append("raw")
-            preprocess_data["accepted"].append(traj_accepted)
-
-            preprocess_data["trial"].append(trial.name)
-            preprocess_data["n_outlier"].append(n_interpolated_outliers)
-            preprocess_data["type"].append("interpolated")
-            preprocess_data["accepted"].append(traj_accepted)
-
-            if not traj_accepted and n_raw_outliers < MAX_OUTLIER: # if more than MAX_OUTLIER outler, no need for verification 
-                traj.plot_preprocess(
-                    interpolated_coords=traj.interpolated_coords,
-                    outlier_filtered_coords=outlier_coords,
-                    raw_coords=raw_coords,
-                    time_pad_off=trial.time_pad_off,
-                    title=f"{trial.name}",
-                    save_as=interpolation_dir / f"interpolation_{trial.name}.png",
+                traj = Trajectory(
+                    coords_path=trial.pred_path,
+                    view=trial.camera_view,
+                    bodypart="finger_3",
+                    cm_per_pixel=trial.cm_per_pixel,
+                    lever_position=trial.lever_position,
                 )
 
-                trial.update(traj=traj, 
-                            coords=traj.interpolated_coords,
-                            coords_success=traj_accepted, 
-                            coords_success_reason=f"Less than {MAX_OUTLIER} outliers (need validation)",)
-                continue
+                raw_coords = traj.compute_instant_metrics(traj.coords)
+                raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
+                n_raw_outliers = int(raw_outlier_mask.sum())
 
-            if not traj_accepted and n_raw_outliers > MAX_OUTLIER: 
-                trial.update(traj=traj, 
-                            coords=traj.interpolated_coords,
-                            coords_success=traj_accepted, 
-                            coords_success_reason=f"Rejected, more than {MAX_OUTLIER} outliers (no validation)",
-                        validation_success=False, 
-                        validation_success_reason=f"Rejected, more than {MAX_OUTLIER} outliers (no validation)")
-                continue
+                outlier_filtered_coords = traj.filter_outliers(coords=raw_coords, method="eucli_anchored", gap_scale=GAP)
 
-            trial.update(traj=traj, 
-                        coords=traj.interpolated_coords,
-                        coords_success=traj_accepted, 
-                        coords_success_reason="Interpolated coordinates (no validation)",
-                        validation_success=True, 
-                        validation_success_reason="Interpolated coordinates (no validation)")
+                traj.interpolated_coords = traj.interpolate_data(coords=outlier_filtered_coords, method="spline", max_gap=5)
+                traj.interpolated_coords = traj.compute_instant_metrics(traj.interpolated_coords)
 
+                interpolated_outlier_mask = traj.outlier_euclidian_dist_anchored(traj.interpolated_coords, threshold=DIST_THRESH, gap_scale=GAP)
+                n_interpolated_outliers = int(interpolated_outlier_mask.sum())
 
-        outlier_df = pd.DataFrame(preprocess_data)
-        outlier_df.to_csv(preprocess_data_path)
+                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_raw_outliers, "type": "raw"})
+                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_interpolated_outliers, "type": "interpolated"})
 
-        self.trialgroup.save(self.paths.trials_metadata)
+                # --- decide the outlier stage outcome ---
+                if n_interpolated_outliers == 0:
+                    traj.set_stage("outlier", success=True, reason=f"Accepted, 0 outliers found")
+                elif n_interpolated_outliers >= MAX_OUTLIER:
+                    traj.set_stage("outlier", success=False, reason=f"Rejected, {n_interpolated_outliers}>={ACCEPT_THRESHOLD}")
+                    traj.set_stage("validation", success=False, reason=f"Rejected, {n_interpolated_outliers}>={ACCEPT_THRESHOLD}")
+                else:
+                    traj.set_stage("outlier", success=False, reason=f"Rejected, {n_interpolated_outliers}<{ACCEPT_THRESHOLD} (need validation)")
+                    traj.plot_preprocess(
+                                        interpolated_coords=traj.interpolated_coords,
+                                        outlier_filtered_coords=outlier_filtered_coords,
+                                        raw_coords=raw_coords,
+                                        time_pad_off=trial.time_pad_off,
+                                        title=trial.name,
+                                        save_as=interpolation_dir / f"{bodypart}_{trial.name}.png",
+                                    )
+                    
+                trial.trajectories[bodypart] = traj
 
-        self.trialgroup.distri_outlier(data=outlier_df, save_as=outlier_fig_path)
-        self.trialgroup.lineplot_all_traj(save_as=preprocess_dir / "all_traj(laser period only).png")
+            outlier_df = pd.DataFrame(preprocess_records)
+            outlier_df.to_csv(preprocess_data_path)
 
+            self.trialgroup.save(self.paths.trials_metadata)
+            self.trialgroup.distri_outlier(data=outlier_df, save_as=outlier_fig_path)
+            self.trialgroup.lineplot_all_traj(save_as=preprocess_dir / f"{bodypart}_traj.png")
 
 
     @process_time

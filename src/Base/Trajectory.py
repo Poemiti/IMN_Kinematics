@@ -4,6 +4,7 @@ from .File import File as BaseFile
 import pandas as pd
 from pathlib import Path
 import numpy as np
+from .Outcome import Outcome
 
 import matplotlib.pyplot as plt
 
@@ -13,6 +14,7 @@ class Trajectory:
     """A trajectory is defined in a classical cartesian plane, in cm"""
 
     file_cls = BaseFile
+    STAGE = ()
 
     def __init__(self,
                 coords_path: Path,
@@ -34,6 +36,9 @@ class Trajectory:
         self.frame_width = frame_width
         self.frame_height = frame_height
         self.cm_per_pixel = cm_per_pixel
+        self.stage_outcomes = {
+            name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)
+        }
 
         # raw pixel coordinates, untouched — kept for debugging / overlaying on the source video
         self.raw_coords = self._open_DLC_results()
@@ -43,6 +48,46 @@ class Trajectory:
         # setup coordinates into cartesian plane (bottom-left origin) + cm units
         self.coords = self._array_to_scaled_cartesian(self.raw_coords)
         self.lever_position = self._point_to_scaled_cartesian(*lever_position) if lever_position else None
+
+
+    ############## Success function #############
+
+    def set_success(self, stage: str, success: bool, reason: str):
+        outcome = self.stage_outcomes.get(stage)
+        if outcome is None:
+            raise ValueError(f"Unknown stage '{stage}' for bodypart '{self.bodypart}'")
+        outcome.success = success
+        outcome.reason = reason
+
+    def is_valid(self, upto: str = None) -> bool:
+        limit = self.stage_outcomes[upto].order if upto else float("inf")
+        return all(o.success for o in self.stage_outcomes.values() if o.order <= limit)
+
+    def failure(self) -> Outcome | None:
+        for outcome in sorted(self.stage_outcomes.values()):
+            if not outcome.success:
+                return outcome
+        return None
+
+
+    ################ saving function ###############
+
+    def to_dict(self) -> dict:
+        return {
+            "bodypart": self.bodypart,
+            "coords": self.coords,
+            "raw_coords": self.raw_coords,
+            "stage_outcomes": {k: o.to_dict() for k, o in self.stage_outcomes.items()},
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "Trajectory":
+        obj = cls.__new__(cls)   # bypass __init__ (no coords_path to re-read from disk)
+        obj.bodypart = data["bodypart"]
+        obj.coords = data.get("coords")
+        obj.raw_coords = data.get("raw_coords")
+        obj.stage_outcomes = {k: Outcome.from_dict(v) for k, v in data["stage_outcomes"].items()}
+        return obj
 
 
 

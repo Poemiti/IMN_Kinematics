@@ -6,15 +6,24 @@ import yaml
 import pandas as pd
 from datetime import date, datetime
 
+from src.Base.Outcome import Outcome
 
 class Trial:
     FIELDS: tuple = ()          # everything — goes into joblib as-is
     YAML_FIELDS: tuple = ()     # subset that gets written to the per-trial yaml
+    STAGES: tuple = ()
 
     def __init__(self, clip_path: str, yaml_path: str = None):
         self.clip_path = clip_path
         self.yaml_path = Path(yaml_path) if yaml_path else Path(clip_path).with_suffix(".yaml")
 
+        self.trial_outcomes: dict[str, Outcome] = {
+                    name: Outcome(stage=name, order=i) 
+                    for i, name in enumerate(self.STAGES)
+                }
+        
+    # methods to save or updates Trial attributs
+        
     def update(self, **kwargs):
         for key, value in kwargs.items():
             if key not in self.FIELDS:
@@ -39,6 +48,10 @@ class Trial:
             return value.isoformat()
         if isinstance(value, Path):
             return str(value)
+        if isinstance(value, dict):
+            return {k: Trial._serialize_value(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [Trial._serialize_value(v) for v in value]
         if hasattr(value, "to_dict"):          # e.g. a Trajectory-like object
             return value.to_dict()
         return value
@@ -57,6 +70,25 @@ class Trial:
         with open(path, "r") as f:
             data = yaml.safe_load(f)
         return self.from_dict(data)
+
+    # methods related to success of trials
+
+    def set_success(self, stage: str, success: bool, reason: str):
+        outcome = self.trial_outcomes.get(stage)
+        if outcome is None:
+            raise ValueError(f"Unknown stage '{stage}' — declared: {self.STAGES}")
+        outcome.success = success
+        outcome.reason = reason
+
+    def is_valid(self, upto: str = None) -> bool:
+        limit = self.trial_outcomes[upto].order if upto else float("inf")
+        return all(o.success for o in self.trial_outcomes.values() if o.order <= limit)
+
+    def failure(self) -> Outcome | None:
+        for outcome in sorted(self.stage_outcomes.values()):
+            if not outcome.success:
+                return outcome
+        return None
 
 
     def dlc_predict(self, model_path: Path, 

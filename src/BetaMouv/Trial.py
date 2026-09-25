@@ -5,10 +5,13 @@ from .Leds import Leds
 from .File import File
 from .Trajectory import Trajectory
 from.BehaviorBox import BehaviorBox
+from src.Base.Outcome import Outcome
 
 import pandas as pd
 
 class Trial(BaseTrial):
+        
+    STAGES = ("clip_openable", "view_match_task", "task") # order is important, all done in "build_metadata"
 
     IDENTITY_FIELDS = (
         "name", "clip_path", "date", "camera_view", "clip_number",
@@ -32,7 +35,7 @@ class Trial(BaseTrial):
         "pred_path", "lever_position", "behaviorBox",
         "validation_success", "validation_success_reason", "traj", 
         "coords", "coords_success", "coords_success_reason",
-        "camera_shift"
+        "camera_shift", "stage_outcomes"
     )
 
 
@@ -88,21 +91,16 @@ class Trial(BaseTrial):
         self.behaviorBox: BehaviorBox = None
         self.camera_shift: tuple[float] = None
 
+        self.trajectories: dict[str, Trajectory] = {}
+
+
+    def bodypart_valid(self, bodypart: str) -> bool:
+        traj = self.trajectories.get(bodypart)
+        return self.is_valid() and traj is not None and traj.is_valid()
+        
+
     def identity(self) -> dict:
         return {f: getattr(self, f, None) for f in self.IDENTITY_FIELDS}
-
-    def _is_successful(self): 
-
-        if self.task_success is None: 
-            raise ValueError(f"'Task success' not defined, must run 'build_metadata' first")
-        if self.validation_success is None and self.coords_success is None: 
-            # print(f"'Model success' not defined, must run 'validation' first")
-            return self.task_success
-        if self.validation_success is None: 
-            return self.task_success and self.coords_success
-        
-        return self.task_success and self.coords_success and self.validation_success
-    
 
 
     def set_led_info(self, led_obj: Leds):
@@ -139,24 +137,30 @@ class Trial(BaseTrial):
         """Set if the rat did the correct task
         A correct task is when the rat lift the paw associated with the task.
         Unsuccessful is when the paw we're looking at has not been lift in time"""
-        if self.cue_type is None: 
-            self.update(task_success = False,
-                        task_success_reason = "Rejected, no cue detected")
+        if self.cue_type == "noCue": 
+            self.set_success(stage="task", success=False, reason = "Rejected, no cue detected")
 
         elif self.time_pad_off == 0 : 
-            self.update(task_success = False, 
-                        task_success_reason = "Rejected, bad split video")
+            self.set_success(stage="task", success=False, reason = "Rejected, bad split video")
 
         elif self.time_pad_off is None:
-            # print("  ! Pad off time is None")
-            self.update(task_success = False,
-                        task_success_reason = "Rejected, no pad off")
+            self.set_success(stage="task", success=False, reason = "Rejected, no pad off")
 
         elif self.time_laser_on is not None and self.time_laser_on + laser_duration > 3:
-            # print(f"  ! Laser window out of bounds (laser_on={time_laser_on})")
-            self.update(task_success = False,
-                        task_success_reason = "Rejected, late pad off")
+            self.set_success(stage="task", success=False, reason = "Rejected, late pad off")
 
         else : 
-            self.update(task_success = True,
-                        task_success_reason = "Successful, paw lifted")
+            self.set_success(stage="task", success=True, reason = "Successful, paw lifted")
+
+
+    # saving methods 
+
+    def trajectory_outcomes_dict(self) -> dict:
+        """Just the pass/fail per bodypart, yaml-safe — no coordinate data."""
+        return {bp: entry["outcome"].to_dict() 
+                for bp, entry in self.trajectories.items()}
+
+    def to_yaml_dict(self) -> dict:
+        data = super().to_yaml_dict()  # everything in YAML_FIELDS, normally serialized
+        data["trajectory_outcomes"] = self.trajectory_outcomes_dict()
+        return data

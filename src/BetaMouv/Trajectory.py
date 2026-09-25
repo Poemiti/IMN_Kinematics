@@ -21,6 +21,7 @@ sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
 class Trajectory(BaseTrajectory): 
 
     file_cls = File 
+    STAGE = ("outlier", "validation")
 
 
     ################## Trajectory filtration method ###############
