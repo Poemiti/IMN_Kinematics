@@ -2,19 +2,27 @@
 
 # movement type
 mvt_type: 
-  CONTRA: true
-  IPSI: 
+  CONTRA: t
+  IPSI: t
+  UNKNOWN: t
 
 # condition
 condition: 
-  CHR: true
-  CTRL: 
+  CHR: t
+  CTRL: t
 
 # subject
 subject: 
-  "#517": true
+  "#517": t
   "#525": 
   "#521": 
-  "#531": true
+  "#531": t
   "#527": 
   "#516": 
+
+# laser state
+laser_state: 
+  LaserOff: t
+  LaserOn: t
+  UNKNOWN: t
+

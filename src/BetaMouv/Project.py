@@ -190,18 +190,16 @@ class Project(BaseProject):
             print("\nBuilding metadata:", clip.path.stem)
 
             if not clip.is_openable or not clip.is_readable: 
-                trial.set_success(stage="clip_openable", success=False, reason="Clip not openable or readable")
-                trial.set_group(laser_state="UNKNOWN")
+                trial.set_success(stage="clip_openable", success=False, reason="Clip not readable")
+                trial.set_success(stage="view_match_task", success=False, reason="Clip not readable")
+                trial.set_success(stage="task", success=False, reason="Clip not readable")
+
+                trial.set_group(laser_state="UNKNOWN", mvt_type="UNKNOWN")
                 trials_by_group.setdefault(trial.group, []).append(trial)
                 trial.save_yaml()
                 continue
 
             trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
-
-            # if (clip.path.parent / f"{clip.path.stem}.yaml").exists(): 
-            #     print("Metadata already builded !")
-            #     continue
-
 
             # get annotation number
             annotation_meta = {
@@ -273,10 +271,20 @@ class Project(BaseProject):
 
         for previous_trial in tqdm(self.trialgroup.trials, desc="Metadata update"): 
 
-            if not previous_trial.is_valid(): 
-                continue
-        
             updated_trial = Trial(previous_trial.clip_path)
+            clip = Video(previous_trial.clip_path)
+
+            if not clip.is_openable or not clip.is_readable: 
+                updated_trial.set_success(stage="clip_openable", success=False, reason="Clip not readable")
+                updated_trial.set_success(stage="view_match_task", success=False, reason="Clip not readable")
+                updated_trial.set_success(stage="task", success=False, reason="Clip not readable")
+
+                updated_trial.set_group(laser_state="UNKNOWN", mvt_type="UNKNOWN")
+                updated_trials.append(updated_trial)
+                updated_trial.save_yaml()
+                continue
+            
+            updated_trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
 
             # get camera shift info
             shift_meta = {
@@ -295,6 +303,14 @@ class Project(BaseProject):
                             time_laser_on=previous_trial.time_laser_on,
                             time_reward=previous_trial.time_reward,
                         )
+
+            if (previous_trial.camera_view == "left" and previous_trial.cue_type == "CueL2") or \
+                (previous_trial.camera_view == "right" and previous_trial.cue_type == "CueL1") : 
+                updated_trial.set_success(stage="view_match_task", success=False, reason=f"'{updated_trial.camera_view}' not compatible with '{updated_trial.cue_type}'")
+            else: 
+                updated_trial.set_success(stage="view_match_task", success=True, reason=f"Compatible view with task")
+
+
             updated_trial.set_task_success(self.project_info["laser_on_duration"])
             updated_trial.set_mvt_type(self.subject_info[previous_trial.subject]["hemi"])
             updated_trial.set_group()
@@ -502,7 +518,7 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        self.define_camera_shift()
+        # self.define_camera_shift()
         
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
 
@@ -525,6 +541,6 @@ class Project(BaseProject):
         
         # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / "all_traj.svg")
 
-        # self.trialgroup.success_rate_report(u.make_path(analysis_dir, "success_rate.txt"))
+        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
         
         

@@ -5,7 +5,7 @@ from dataclasses import dataclass, asdict
 class Outcome:
     stage: str
     order: int                     # position in the pipeline — enables sorting/comparison
-    success: bool | None = None    # None = not yet run
+    success: bool | None = False    # None = not yet run
     reason: str = "not_run"
 
     def __bool__(self):

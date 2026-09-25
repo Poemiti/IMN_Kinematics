@@ -71,7 +71,7 @@ class TrialGroup(BaseTrialGroup):
 
             for trial in self.trials:
 
-                for stage, outcome in trial.stage_outcomes.items():
+                for stage, outcome in trial.trial_outcomes.items():
                     records.append(trial.identity() | {
                             "stage": stage,
                             "success": outcome.success,
@@ -90,7 +90,7 @@ class TrialGroup(BaseTrialGroup):
             records = []
             for trial in self.trials:
                 for bodypart, traj in trial.trajectories.items():
-                    for stage, outcome in traj.stage_outcomes.items():
+                    for stage, outcome in traj.trial_outcomes.items():
 
                         records.append(trial.identity() | {
                             "bodypart": bodypart,
@@ -156,15 +156,26 @@ class TrialGroup(BaseTrialGroup):
     ####################### plotting methods ###########################
 
     def trial_success_rate(self, save_as):
-        """Display success rates and failure reasons, and save the report."""
+        """Display success rate and failure reasons per stage, and save the report."""
 
         df = self.success_df()
 
-        fig, ax = plt.subplots()
+        g = sns.catplot(
+            data=df, kind="count",
+            x="success",
+            col="stage", hue="success",
+            sharex=False,
+        )
+        g.set_axis_labels("Success", "Number of trials")
+        g.figure.suptitle("Trial success rate by stage", y=1.02)
 
-        # print(f"Report saved to: {save_as}")
+        g.figure.savefig(save_as, bbox_inches="tight")
+        plt.show()
+        plt.close(g.figure)
 
+        print(f"Report saved to: {save_as}")
 
+        return 
 
     def lineplot_all_traj(self, save_as):
         data = self._timeseries_df

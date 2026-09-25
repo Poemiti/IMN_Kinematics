@@ -45,7 +45,6 @@ class TrialGroup:
                 return False
 
             not_keep_val = [value for value, keep in criteria.items() if not keep]
-
             if any(value in name for value in not_keep_val):
                 return False
 
@@ -57,8 +56,6 @@ class TrialGroup:
         if trial_list is None : 
             print("Loading trials from trialgroup")
             trial_list = self.trials
-        else: 
-            self.trials = trial_list
 
         for trial in trial_list:
             by_group.setdefault(trial.group, []).append(trial)

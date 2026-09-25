@@ -108,6 +108,10 @@ class Trial(BaseTrial):
         if self.cue_type == "NoCue": 
             self.update(movement_type="UNKNOWN")
             return
+        if self.cue_type is None or self.stim_location is None:
+            print() 
+            print(self.name)
+            print(self.trial_outcomes["clip_openable"])
 
         is_contra = (
             hemi_info[self.condition] == self.stim_location
@@ -115,11 +119,15 @@ class Trial(BaseTrial):
         )
         self.update(movement_type="CONTRA" if is_contra else "IPSI")
 
-    def set_group(self, laser_state: str = None):
+    def set_group(self, laser_state: str = None, mvt_type: str = None):
         if laser_state is None: 
             laser_state= self.laser_state
+
+        if mvt_type is None: 
+            mvt_type= self.movement_type
+
         self.update(group=(
-            f"{self.subject}_{self.condition}_{self.movement_type}_"
+            f"{self.subject}_{self.condition}_{mvt_type}_"
             f"{self.laser_type}_{self.stim_location}_"
             f"{self.camera_view}View_{self.laser_intensity}_{laser_state}"
         ))
@@ -132,6 +140,9 @@ class Trial(BaseTrial):
         if self.cue_type == "noCue": 
             self.set_success(stage="task", success=False, reason = "Rejected, no cue detected")
 
+        elif self.cue_type is None: 
+            self.set_success(stage="task", success=False, reason = "Rejected, clip not readable")
+        
         elif self.time_pad_off == 0 : 
             self.set_success(stage="task", success=False, reason = "Rejected, bad split video")
 
