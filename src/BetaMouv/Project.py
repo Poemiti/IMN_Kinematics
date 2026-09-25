@@ -132,14 +132,14 @@ class Project(BaseProject):
         frames_paths = set()
         frames_paths.update(raw_frames_dir.glob("*.png")) 
 
-        ref_path = Path("/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/raw_frames/#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png")
+        ref_path = Path("/home/poemiti/IMN_Kinematics/data/BetaMouv/camera_shift/raw_frames/#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05_5.png")
 
         shift_config: dict = {"rules":[]}
 
         for trial in self.trialgroup.trials: 
 
             trial_comb = trial.group + "_" + trial.date.isoformat()
-            output_path = u.make_path(raw_frames_dir, f"{trial_comb}.png")
+            output_path = u.make_path(raw_frames_dir, f"{trial_comb}")
 
             # 1. extract frame (if not already done)
             if not output_path in frames_paths :
@@ -147,25 +147,23 @@ class Project(BaseProject):
                 print("extracting:", trial_comb)
 
                 video = Video(trial.clip_path)
-                video.extractframes(frame_range=[5], output_path=output_path)
-            else : 
-                print("loading:", trial_comb)
+                video.extract_frames(frame_range=[5], output_base=output_path)
 
-            # 2. compute camera shift
-            dx, dy = video.compute_camera_shift(ref_path=ref_path, 
-                                        save_as=superimpose_dir / f"{trial_comb}.png")
-            shift_config["rules"].append({
-                            "when": {
-                                "date": trial.date.isoformat(),
-                                "group": trial.group
-                            },
-                            "value": {
-                                "flip": trial.camera_view == "right",
-                                "dx": dx.round(3).item(),
-                                "dy": dy.round(3).item()
-                            }
-                            
-                        })
+                # 2. compute camera shift
+                dx, dy = video.compute_camera_shift(ref_path=ref_path, img_path=f"{output_path}_5.png",
+                                            save_as=superimpose_dir / f"{trial_comb}.png")
+                shift_config["rules"].append({
+                                "when": {
+                                    "date": trial.date.isoformat(),
+                                    "group": trial.group
+                                },
+                                "value": {
+                                    "flip": trial.camera_view == "right",
+                                    "dx": dx.round(3).item(),
+                                    "dy": dy.round(3).item()
+                                }
+                                
+                            })
 
         with open(self.config_dir / "rules/camera_shift_rules.yaml", "w") as f: 
             yaml.safe_dump(shift_config, f) 
@@ -193,7 +191,12 @@ class Project(BaseProject):
 
             if not clip.is_openable or not clip.is_readable: 
                 trial.set_success(stage="clip_openable", success=False, reason="Clip not openable or readable")
+                trial.set_group(laser_state="UNKNOWN")
+                trials_by_group.setdefault(trial.group, []).append(trial)
+                trial.save_yaml()
                 continue
+
+            trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
 
             # if (clip.path.parent / f"{clip.path.stem}.yaml").exists(): 
             #     print("Metadata already builded !")
@@ -215,21 +218,23 @@ class Project(BaseProject):
             if (trial.camera_view == "left" and leds.cue_type == "CueL2") or \
                (trial.camera_view == "right" and leds.cue_type == "CueL1") : 
                 trial.set_success(stage="view_match_task", success=False, reason=f"'{trial.camera_view}' not compatible with '{leds.cue_type}'")
-                continue
-
-            # get camera shift info
-            shift_meta = {
-                "date": trial.date,
-                "group": trial.group,
-            }
-
-            shift = u.match_rule(shift_meta, self.camera_shift_rules)
-            trial.update(camera_shift=shift)
+            else:
+                trial.set_success(stage="view_match_task", success=True, reason=f"Compatible view with task")
 
             trial.set_led_info(leds)
             trial.set_task_success(self.project_info["laser_on_duration"])
             trial.set_mvt_type(self.subject_info[trial.subject]["hemi"])
             trial.set_group()
+
+            # get camera shift info
+            shift_meta = {
+                "date": trial.date.isoformat(),
+                "group": trial.group,
+            }
+            print(shift_meta)
+            
+            shift = u.match_rule(shift_meta, self.camera_shift_rules)
+            trial.update(camera_shift=shift)
 
             pred_path = trial.file.path.parent / f"pred_results_{trial.name}.csv"
             if pred_path.exists(): 
@@ -240,12 +245,16 @@ class Project(BaseProject):
             # Add trial to its group
             trials_by_group.setdefault(trial.group, []).append(trial)
 
+        n_trial=0
         # Save one big joblib per group
         print("\nTrials saved as joblibs: ")
         for group, trials in trials_by_group.items():
 
             joblib.dump(trials, u.make_path(self.paths.trials_metadata, f"{group}.joblib"))
             print(f"  {group}: {len(trials)}")
+            n_trial+=len(trials)
+
+        print(f"\nTotal trials processed: {n_trial}")
 
 
         # print("\nVisualisation of the proportion of each experimental condition\n")
@@ -493,16 +502,16 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        # self.define_camera_shift()
+        self.define_camera_shift()
         
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
 
-        trial = self.trialgroup.trials[0]
-        vid = Video(trial.clip_path)
-        vid.annotate_video(output_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",)
-        vid.extract_frames(frame_range=range(0, 150), 
-                           video_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",
-                           output_base=u.make_path(self.paths.data_root / "annotated_vid" , "frame"))
+        # trial = self.trialgroup.trials[0]
+        # vid = Video(trial.clip_path)
+        # vid.annotate_video(output_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",)
+        # vid.extract_frames(frame_range=range(0, 150), 
+        #                    video_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",
+        #                    output_base=u.make_path(self.paths.data_root / "annotated_vid" , "frame"))
 
         # self.trialgroup.crop_coords(True)
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / "timeseries_df.csv")

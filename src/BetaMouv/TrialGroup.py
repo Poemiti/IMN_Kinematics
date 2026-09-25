@@ -37,6 +37,7 @@ class TrialGroup(BaseTrialGroup):
         self._success_df = None
         self._scalar_df = None
         self._timeseries_df = None
+        self._bodypart_success_df = None
 
         self.crop_laser_period = False
 
@@ -69,18 +70,37 @@ class TrialGroup(BaseTrialGroup):
             records = []
 
             for trial in self.trials:
-                records.append(trial.identity() | {
-                    "task_success": trial.task_success ,
-                    "task_success_reason": trial.task_success_reason ,
-                    "coords_success": trial.coords_success,
-                    "coords_success_reason": trial.coords_success_reason,
-                    "validation_success": trial.validation_success,
-                    "validation_success_reason": trial.validation_success_reason,
-                })
+
+                for stage, outcome in trial.stage_outcomes.items():
+                    records.append(trial.identity() | {
+                            "stage": stage,
+                            "success": outcome.success,
+                            "reason": outcome.reason,
+                        })
 
             self._success_df = pd.DataFrame(records)
 
         return self._success_df
+
+
+    def bodypart_success_df(self) -> pd.DataFrame:
+        """One row per (trial, bodypart, stage) — for per-bodypart QC figures."""
+
+        if self._bodypart_success_df is None:
+            records = []
+            for trial in self.trials:
+                for bodypart, traj in trial.trajectories.items():
+                    for stage, outcome in traj.stage_outcomes.items():
+
+                        records.append(trial.identity() | {
+                            "bodypart": bodypart,
+                            "stage": stage,
+                            "success": outcome.success,
+                            "reason": outcome.reason,
+                        })
+                        
+            self._bodypart_success_df = pd.DataFrame(records)
+        return self._bodypart_success_df
 
 
     def scalar_df(self, metrics: list[str] = None) -> pd.DataFrame:
@@ -135,84 +155,14 @@ class TrialGroup(BaseTrialGroup):
     
     ####################### plotting methods ###########################
 
-    def success_rate_report(self, save_as):
+    def trial_success_rate(self, save_as):
         """Display success rates and failure reasons, and save the report."""
 
         df = self.success_df()
 
-        n_trials = len(df)
+        fig, ax = plt.subplots()
 
-        if n_trials == 0:
-            report = "No trials found.\n"
-            print(report)
-            with open(save_as, "w") as f:
-                f.write(report)
-            return
-
-        # Store everything that will be printed
-        report_lines = []
-
-        report_lines.append(f"Total trials: {n_trials}\n")
-
-        # Success rates
-        success_columns = [
-            "task_success",
-            "coords_success",
-            "validation_success",
-        ]
-
-        report_lines.append("SUCCESS RATES")
-        report_lines.append("-" * 40)
-
-        for column in success_columns:
-            # Treat None/NaN as False
-            success = df[column].fillna(False).astype(bool)
-
-            n_success = success.sum()
-            rate = n_success / n_trials * 100
-
-            report_lines.append(
-                f"{column:20s}: "
-                f"{n_success:4d}/{n_trials:<4d} "
-                f"({rate:5.1f}%)"
-            )
-
-        # Failure reasons
-        reason_columns = [
-            ("task_success", "task_success_reason"),
-            ("coords_success", "coords_success_reason"),
-            ("validation_success", "validation_success_reason"),
-        ]
-
-        for success_col, reason_col in reason_columns:
-
-            failures = df[reason_col].dropna()
-
-            report_lines.append(f"\n{reason_col}")
-            report_lines.append("-" * 40)
-
-            if failures.empty:
-                report_lines.append("No failures")
-                continue
-
-            counts = failures.value_counts()
-
-            for reason, count in counts.items():
-                percentage = count / n_trials * 100
-
-                report_lines.append(
-                    f"{str(reason):30s}: "
-                    f"{count:4d} "
-                    f"({percentage:5.1f}%)"
-                )
-
-        report = "\n".join(report_lines) + "\n"
-        print(report)
-
-        with open(save_as, "w") as f:
-            f.write(report)
-
-        print(f"Report saved to: {save_as}")
+        # print(f"Report saved to: {save_as}")
 
 
 

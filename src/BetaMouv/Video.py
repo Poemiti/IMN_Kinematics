@@ -37,15 +37,25 @@ class Video(BaseVideo):
 
 
     def compute_camera_shift(self, ref_path, img_path = None, save_as = None):
-        if img_path is None: 
+        if img_path is None:
             img_path = self.path
-         
-        ref_img = imread(str(ref_path))
-        ref_img = ref_img[450:, :, :]
 
+        ref_img = imread(str(ref_path))
         img = imread(str(img_path))
+
+        # print("Reference:", ref_path)
+        # print("  shape:", ref_img.shape)
+
+        # print("Image:", img_path)
+        # print("  shape:", img.shape)
+
+        ref_img = ref_img[450:, :, :]
         img = img[450:, :, :]
 
+        # print("After crop:")
+        # print("  ref_img:", ref_img.shape)
+        # print("  img:", img.shape)
+        
         # shift calculation 
         
         ref_gray = rgb2gray(ref_img)

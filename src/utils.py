@@ -27,7 +27,7 @@ def make_path(base_dir: Path, file_name: str) ->  Path:
 
 
 def make_dir(dir: Path) -> Path: 
-    dir.mkdir(parent=True, exist_ok=True)
+    dir.mkdir(parents=True, exist_ok=True)
     return dir
 
 

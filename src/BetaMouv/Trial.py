@@ -19,7 +19,7 @@ class Trial(BaseTrial):
         "condition", "session", "stim_location", "laser_state", 
         "movement_type", "cue_type",
         "time_pad_off", "time_laser_on", "time_reward", "group",
-        "task_success", "task_success_reason",
+        "trial_outcomes"
     )
 
     SCALAR_METRICS = (
@@ -32,14 +32,12 @@ class Trial(BaseTrial):
         "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
         # computed after prediction and metadata_building
-        "pred_path", "lever_position", "behaviorBox",
-        "validation_success", "validation_success_reason", "traj", 
-        "coords", "coords_success", "coords_success_reason",
-        "camera_shift", "stage_outcomes"
+        "pred_path", "behaviorBox", "camera_shift",
+        "trajectories"
     )
 
 
-    YAML_FIELDS = tuple(f for f in FIELDS if f not in ["traj", "behaviorBox"])
+    YAML_FIELDS = tuple(f for f in FIELDS if f not in ["trajectories", "behaviorBox"])
 
 
     def __init__(self, clip_path: str, yaml_path: str = None):
@@ -66,7 +64,6 @@ class Trial(BaseTrial):
 
         # pipeline-computed fields, unknown at construction time
         # set after build_metadata
-        self.lever_position: tuple[int] = None
         self.movement_type: str = None
         self.laser_state: str = None
         self.cue_type: str = None
@@ -81,13 +78,6 @@ class Trial(BaseTrial):
         self.task_success_reason: str = "unknown"
 
         # set after preprocessing + validation
-        self.coords: pd.Dataframe = None
-        self.coords_success: bool = False
-        self.coords_success_reason: str = "unknown"
-        self.validation_success: bool = False
-        self.validation_success_reason: str = "unknown"
-
-        self.traj: Trajectory = None
         self.behaviorBox: BehaviorBox = None
         self.camera_shift: tuple[float] = None
 
@@ -125,11 +115,13 @@ class Trial(BaseTrial):
         )
         self.update(movement_type="CONTRA" if is_contra else "IPSI")
 
-    def set_group(self):
+    def set_group(self, laser_state: str = None):
+        if laser_state is None: 
+            laser_state= self.laser_state
         self.update(group=(
             f"{self.subject}_{self.condition}_{self.movement_type}_"
             f"{self.laser_type}_{self.stim_location}_"
-            f"{self.camera_view}View_{self.laser_intensity}_{self.laser_state}"
+            f"{self.camera_view}View_{self.laser_intensity}_{laser_state}"
         ))
 
 
