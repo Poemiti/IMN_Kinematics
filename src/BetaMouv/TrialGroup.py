@@ -159,6 +159,7 @@ class TrialGroup(BaseTrialGroup):
         """Display success rate and failure reasons per stage, and save the report."""
 
         df = self.success_df()
+        df.to_csv("fjohfzue.csv")
 
         g = sns.catplot(
             data=df, kind="count",
@@ -167,7 +168,29 @@ class TrialGroup(BaseTrialGroup):
             sharex=False,
         )
         g.set_axis_labels("Success", "Number of trials")
-        g.figure.suptitle("Trial success rate by stage", y=1.02)
+        g.set_titles(col_template="{col_name}")
+        g.figure.suptitle("Trial success rate by stage")
+        g.figure.subplots_adjust(top=0.88)
+
+        # annotate each bar with its % of that stage's total trial count
+        for stage, ax in zip(g.col_names, g.axes.flat):
+            stage_total = (df["stage"] == stage).sum()
+            if stage_total == 0:
+                continue
+
+            for bar in ax.patches:
+                height = bar.get_height()
+                if height <= 0:
+                    continue
+
+                rate = 100 * height / stage_total
+                ax.annotate(
+                    f"{rate:.1f}%",
+                    xy=(bar.get_x() + bar.get_width() / 2, height),
+                    xytext=(0, 3),
+                    textcoords="offset points",
+                    ha="center", va="bottom", fontsize=12
+                )
 
         g.figure.savefig(save_as, bbox_inches="tight")
         plt.show()

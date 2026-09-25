@@ -11,7 +11,7 @@ config_log: None
 
 steps:  # ordered
   split_trials: 
-  build_metadata: t
+  build_metadata: 
   run_prediction: 
   run_preprocessing: 
   run_validation: 

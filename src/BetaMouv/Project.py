@@ -510,7 +510,7 @@ class Project(BaseProject):
             
 
 
-
+    @process_time 
     def run_analysis(self): 
         print(f"""
         =============== Analysis =================
