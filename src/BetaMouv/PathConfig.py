@@ -10,7 +10,6 @@ class PathConfig:
 
     project_name: str
     subject_name: str | None = None
-    bodypart: str | None = None
 
     # Input data
     model: Path = Path("/media/filer2/T4b/UserFolders/Poemiti/Reaching-DLC-model-main/data/model/DLC-Poe-2026-03-27/")

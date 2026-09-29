@@ -8,6 +8,8 @@ from.BehaviorBox import BehaviorBox
 from src.Base.Outcome import Outcome
 
 import pandas as pd
+from pathlib import Path
+from datetime import datetime
 
 class Trial(BaseTrial):
         
@@ -39,6 +41,7 @@ class Trial(BaseTrial):
 
     YAML_FIELDS = tuple(f for f in FIELDS if f not in ["trajectories", "behaviorBox"])
 
+    date: datetime
 
     def __init__(self, clip_path: str, yaml_path: str = None):
         super().__init__(clip_path, yaml_path)
@@ -46,21 +49,21 @@ class Trial(BaseTrial):
         self.file = File(clip_path)
 
         # identity fields, filled immediately from the parsed filename
-        self.name = self.file.name
-        self.clip_path = self.file.path
-        self.date = self.file.date
-        self.camera_view = self.file.camera_view
-        self.clip_number = self.file.clip_number
-        self.laser_intensity = self.file.laser_intensity
-        self.handedness = self.file.handedness
-        self.laser_type = self.file.laser_type
-        self.subject = self.file.subject
-        self.condition = self.file.condition
-        self.session = self.file.session
-        self.stim_location = self.file.stim_location
-        self.frame_width_px = self.file.frame_width_px
-        self.frame_width_cm = self.file.frame_width_cm
-        self.cm_per_pixel = self.file.cm_per_pixel
+        self.name: str = self.file.name
+        self.clip_path: Path = self.file.path
+        self.date: datetime = self.file.date
+        self.camera_view: str = self.file.camera_view
+        self.clip_number: int = self.file.clip_number
+        self.laser_intensity: str = self.file.laser_intensity
+        self.handedness: str = self.file.handedness
+        self.laser_type: str = self.file.laser_type
+        self.subject: str = self.file.subject
+        self.condition: str = self.file.condition
+        self.session: str = self.file.session
+        self.stim_location: str = self.file.stim_location
+        self.frame_width_px: str = self.file.frame_width_px
+        self.frame_width_cm: str = self.file.frame_width_cm
+        self.cm_per_pixel: str = self.file.cm_per_pixel
 
         # pipeline-computed fields, unknown at construction time
         # set after build_metadata

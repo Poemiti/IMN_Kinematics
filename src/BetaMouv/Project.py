@@ -49,9 +49,15 @@ class Project(BaseProject):
 
         # trial group of the project
         joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
-        self.trialgroup = TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None
-        print("\n-->",len(joblib_filenames), "FILES LOADED")
+        try:
+            self.trialgroup = (TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None)
+            print("\n-->", len(joblib_filenames), "FILES LOADED")
 
+        except EOFError as e:
+            print(f"\nWARNING: Could not load joblib files: {e}")
+            self.trialgroup = None
+
+        
 
     @staticmethod
     def _load_config(filename: Path):
@@ -114,68 +120,21 @@ class Project(BaseProject):
 
         else : 
             raise ValueError(f"'{res}' is not valid, must be 'y' or 'n'")
-         
-
-    def define_camera_shift(self):  
-        # TODO MAKE IT BETTER LOL 
-
-        print(f"""
-        =============== Define Camera shift ===============
-        Project name: {self.name}
-        Config directory: {self.config_dir}
-        ==============================================\n""")
-
-
-        output_dir = u.make_dir(self.paths.data_root / "camera_shift")
-        raw_frames_dir = u.make_dir(output_dir / "raw_frames")
-        superimpose_dir = u.make_dir(output_dir / "superimposed")
-
-        frames_paths = set()
-        frames_paths.update(raw_frames_dir.glob("*.png")) 
-
-        ref_path = Path("/home/poemiti/IMN_Kinematics/data/BetaMouv/camera_shift/raw_frames/#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05_5.png")
-
-        shift_config: dict = {"rules":[]}
-
-        for trial in self.trialgroup.trials: 
-
-            trial_comb = trial.group + "_" + trial.date.isoformat()
-            output_path = u.make_path(raw_frames_dir, f"{trial_comb}")
-
-            # 1. extract frame (if not already done)
-            if not output_path in frames_paths :
-                frames_paths.add(output_path)
-                print("extracting:", trial_comb)
-
-                video = Video(trial.clip_path)
-                video.extract_frames(frame_range=[5], output_base=output_path)
-
-                # 2. compute camera shift
-                dx, dy = video.compute_camera_shift(ref_path=ref_path, img_path=f"{output_path}_5.png",
-                                            save_as=superimpose_dir / f"{trial_comb}.png")
-                shift_config["rules"].append({
-                                "when": {
-                                    "date": trial.date.isoformat(),
-                                    "group": trial.group
-                                },
-                                "value": {
-                                    "flip": trial.camera_view == "right",
-                                    "dx": dx.round(3).item(),
-                                    "dy": dy.round(3).item()
-                                }
-                                
-                            })
-
-        with open(self.config_dir / "rules/camera_shift_rules.yaml", "w") as f: 
-            yaml.safe_dump(shift_config, f) 
-                    
 
 
     @process_time
     def init_metadata(self): 
 
         dataset = Data_filter.load_database(self.paths.raw, self.paths.database, "video")
-
+        
+        shift_dir = u.make_dir(self.paths.data_root / "camera_shift")
+        raw_frames_dir = u.make_dir(shift_dir / "raw_frames")
+        superimpose_dir = u.make_dir(shift_dir / "superimposed")
+        ref_path = Path("/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/"
+                        "#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png")
+        shift_config: dict = {"rules":[]}
+        frames_paths = set()
+        
         trials_by_group = {}
 
         for clip_path in dataset["filename"].iloc[:]:
@@ -221,14 +180,29 @@ class Project(BaseProject):
             trial.set_group()
 
             # get camera shift info
-            shift_meta = {
-                "date": trial.date.isoformat(),
-                "group": trial.group,
-            }
-            print(shift_meta)
+
+            trial_comb = trial.group + "_" + trial.date.isoformat()
+            output_base = u.make_path(raw_frames_dir, f"{trial_comb}")
+            frame_num = 5
+            output_path = f"{output_base}_{frame_num}.png"
+            frames_paths.add(output_path)
+
+            clip.extract_frames(frame_range=[frame_num], output_base=output_base)
+            dx, dy = clip.compute_camera_shift(ref_path=ref_path, img_path=output_path,
+                                                save_as=superimpose_dir / f"{trial_comb}.png")
             
-            shift = u.match_rule(shift_meta, self.camera_shift_rules)
-            trial.update(camera_shift=shift)
+            shift_config["rules"].append({
+                            "when": {
+                                "date": trial.date.isoformat(),
+                                "group": trial.group
+                            },
+                            "value": {
+                                "dx": dx.round(3).item(),
+                                "dy": dy.round(3).item()
+                            }
+                        })
+
+            trial.update(camera_shift=(dx, dy))
 
             pred_path = trial.file.path.parent / f"pred_results_{trial.name}.csv"
             if pred_path.exists(): 
@@ -250,18 +224,35 @@ class Project(BaseProject):
 
         print(f"\nTotal trials processed: {n_trial}")
 
+        # save camera shift info for later use 
+        with open(self.config_dir / "rules/camera_shift_rules.yaml", "w") as f: 
+                    yaml.safe_dump(shift_config, f) 
+
 
     @process_time   
     def update_metadata(self): 
         """Update every metadata of each trial EXEPT the LEDs info"""
 
-        updated_trials = []
+        shift_dir = u.make_dir(self.paths.data_root / "camera_shift")
+        raw_frames_dir = u.make_dir(shift_dir / "raw_frames")
+        superimpose_dir = u.make_dir(shift_dir / "superimposed")
+        ref_path = Path("/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/"
+                        "#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png")
+        shift_config: dict = {"rules":[]}
+        frames_paths = set()
 
-        for previous_trial in tqdm(self.trialgroup.trials, desc="Metadata update"): 
+        updated_trials = {}
+        trials = list(self.paths.raw.rglob("*.mp4"))
 
-            updated_trial = Trial(previous_trial.clip_path)
-            clip = Video(previous_trial.clip_path)
+        for previous_trial_path in tqdm(trials, desc="Metadata update"): 
 
+            previous_trial = Trial(clip_path=previous_trial_path)
+            print(previous_trial.name)
+            previous_trial.load_yaml()
+
+            updated_trial = Trial(previous_trial_path)
+            # clip = Video(previous_trial.clip_path)
+            
             # if not clip.is_openable or not clip.is_readable:
             if not previous_trial.trial_outcomes["clip_openable"].success:  
                 updated_trial.set_success(stage="clip_openable", success=False, reason="Clip not readable")
@@ -269,22 +260,14 @@ class Project(BaseProject):
                 updated_trial.set_success(stage="task", success=False, reason="Clip not readable")
 
                 updated_trial.set_group(laser_state="UNKNOWN", mvt_type="UNKNOWN")
-                updated_trials.append(updated_trial)
+                updated_trials.setdefault(updated_trial.group, []).append(updated_trial)
                 updated_trial.save_yaml()
                 continue
             
             updated_trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
 
-            # get camera shift info
-            shift_meta = {
-                "date": previous_trial.date.isoformat(),
-                "group": previous_trial.group,
-            }
 
-            shift = u.match_rule(shift_meta, self.camera_shift_rules)
-            updated_trial.update(camera_shift=shift)
-
-            # get leds info
+            # get leds info FROM PREVIOUS TRIAL INFO
             updated_trial.update(
                             laser_state=previous_trial.laser_state,
                             cue_type=previous_trial.cue_type,
@@ -299,19 +282,55 @@ class Project(BaseProject):
             else: 
                 updated_trial.set_success(stage="view_match_task", success=True, reason=f"Compatible view X task")
 
-
             updated_trial.set_task_success(self.project_info["laser_on_duration"])
             updated_trial.set_mvt_type(self.subject_info[previous_trial.subject]["hemi"])
             updated_trial.set_group()
+
+            # get camera shift info
+
+            clip = Video(updated_trial.clip_path)
+            trial_comb = updated_trial.group + "_" + updated_trial.date.isoformat()
+            output_base = u.make_path(raw_frames_dir, f"{trial_comb}")
+            frame_num = 5
+            output_path = f"{output_base}_{frame_num}.png"
+            frames_paths.add(output_path)
+
+            clip.extract_frames(frame_range=[frame_num], output_base=output_base)
+            dx, dy = clip.compute_camera_shift(ref_path=ref_path, img_path=output_path,
+                                                save_as=superimpose_dir / f"{trial_comb}.png")
+            dx, dy = dx.round(3).item(), dy.round(3).item()
+
+            shift_config["rules"].append({
+                            "when": {
+                                "date": updated_trial.date.isoformat(),
+                                "group": updated_trial.group
+                            },
+                            "value": {
+                                "dx": dx,
+                                "dy": dy
+                            }
+                        })
+
+            updated_trial.update(camera_shift=(dx, dy))
 
             pred_path = previous_trial.file.path.parent / f"pred_results_{previous_trial.name}.csv"
             if pred_path.exists(): 
                 updated_trial.update(pred_path=str(pred_path))
 
             updated_trial.save_yaml()
-            updated_trials.append(updated_trial)
+            updated_trials.setdefault(updated_trial.group, []).append(updated_trial)
+            
 
-        self.trialgroup.save(self.paths.trials_metadata, trial_list=updated_trials)
+        n_trial=0
+        # Save one big joblib per group
+        print("\nTrials saved as joblibs: ")
+        for group, trials in updated_trials.items():
+
+            joblib.dump(trials, u.make_path(self.paths.trials_metadata, f"{group}.joblib"))
+            print(f"  {group}: {len(trials)}")
+            n_trial+=len(trials)
+
+        print(f"\nTotal trials processed: {n_trial}")
         self.trialgroup.trials = updated_trials
 
 
@@ -354,7 +373,7 @@ class Project(BaseProject):
         outlier_fig_path = preprocess_dir / "outlier_distri.png"
 
         interpolation_dir = preprocess_dir / "interpolation"
-        shutil.rmtree(interpolation_dir, ignore_errors=True)   # clear stale figures first
+        shutil.rmtree(interpolation_dir, ignore_errors=True)   # clear figures first
         u.make_dir(interpolation_dir)                          # then (re)create
 
         MAX_OUTLIER = self.project_info["max_outlier"]
@@ -381,7 +400,7 @@ class Project(BaseProject):
                 )
                 traj.apply_shift(trial.camera_shift)
 
-                raw_coords = traj.compute_instant_metrics(traj.coords)
+                raw_coords = traj.compute_instant_metrics()
                 raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
                 n_raw_outliers = int(raw_outlier_mask.sum())
 
@@ -400,14 +419,15 @@ class Project(BaseProject):
 
                 if n_interpolated_outliers == 0:
                     traj.set_success("outlier", success=True, reason=f"0 outliers found")
-                    traj.clean_coords = traj.coords
+                    traj.set_success("validation", success=True, reason=f"0 outliers found")
+                    traj.clean_coords = raw_coords
 
                 elif n_interpolated_outliers >= MAX_OUTLIER:
                     traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER}")
                     traj.set_success("validation", success=False, reason=f"outliers >= {MAX_OUTLIER}")
                 
                 else:
-                    traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER} need validation")
+                    traj.set_success("outlier", success=False, reason=f"outliers <= {MAX_OUTLIER}, need validation")
                     traj.plot_preprocess(
                                         interpolated_coords=traj.interpolated_coords,
                                         outlier_filtered_coords=outlier_filtered_coords,
@@ -483,23 +503,25 @@ class Project(BaseProject):
             if not trial.is_valid():    
                 continue
 
+            Boxes = BehaviorBox(coords=trial.trajectories,
+                                time_pad_off=trial.time_pad_off,
+                                shift=trial.camera_shift,)
+
+            trial.update(behaviorBox=Boxes)
+
             for bodypart in BODYPARTS: 
 
-                traj = trial.trajectories.get(bodypart)
+                traj: Trajectory = trial.trajectories.get(bodypart)
                 
                 if not traj.is_valid(): 
                     continue
 
-                Boxes = BehaviorBox(coords=trial.coords,
-                                    time_pad_off=trial.time_pad_off,
-                                    shift=trial.camera_shift,)
-                
-                coords = trial.traj.compute_instant_metrics(trial.coords)
-                coords = trial.behaviorBox.classify_trajectory(coords)
+                coords = traj.compute_instant_metrics(trial.coords)
+                coords["behavior_label"] = Boxes.classify_trajectory(coords)
                 ## TODO
                 # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
-                
-                trial.update(behaviorBox=Boxes)
+
+                trial.trajectories[bodypart] = coords            
 
             self.trialgroup.save(self.paths.trials_metadata)
 

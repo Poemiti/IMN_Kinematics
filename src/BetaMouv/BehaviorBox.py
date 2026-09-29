@@ -14,7 +14,7 @@ class BehaviorBox:
     XP, YP = (315, 348)   # pad position (px)
 
     def __init__(self, 
-                 coords: pd.DataFrame,
+                 coords: dict[str, pd.DataFrame],
                  time_pad_off: float,
                  shift: tuple[float] = (0.0, 0.0),
                 frame_width=512,) : 
@@ -28,18 +28,15 @@ class BehaviorBox:
         """
         self.dx, self.dy = shift
 
-        self.coords = coords[["x", "y"]] + (self.dx, self.dy) 
-        
-        self.xl, self.yl = (self.XL + self.dx, self.YL + self.dy )
-        self.xp, self.yp = (self.XP + self.dx, self.YP + self.dy)
+        self.coords = coords
+        self.frame_width = frame_width
+        self.time_pad_off = time_pad_off
 
         # constants
         self.lever_right = 40 + self.dx
         self.lever_upper = 10 + self.dy
         self.lever_lower = 18 + self.dy
-        self.reach_bottom = self.coords.loc[self.coords["t"] == time_pad_off]["y"]
-
-        self.frame_width = frame_width
+        self.reach_bottom = self.coords.loc[self.coords["t"] == self.time_pad_off]["y"]
 
         self.spatial_boxes = self.build_spatial_boxes()
         self.adjusted_boxes = self.build_adjusted_boxes()
@@ -72,22 +69,22 @@ class BehaviorBox:
         }
 
     def bodypart_angle(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
-                               coords: pd.DataFrame | None = None) -> np.ndarray:
+                               coords: dict[str, pd.DataFrame] | None = None) -> np.ndarray:
         """Compute the orientation angle (in degrees) of the segment
         going from bp1 -> bp2, relative to the horizontal axis.
         """
         if coords is None:
             coords = self.coords
 
-        soft_pad = coords[bp1]
-        finger3 = coords[bp2]
+        bodypart1 = coords[bp1]
+        bodypart2 = coords[bp2]
 
-        dx = finger3["x"].to_numpy() - soft_pad["x"].to_numpy()
-        dy = finger3["y"].to_numpy() - soft_pad["y"].to_numpy()
+        dx = bodypart2["x"].to_numpy() - bodypart1["x"].to_numpy()
+        dy = bodypart2["y"].to_numpy() - bodypart1["y"].to_numpy()
 
         angle = np.degrees(np.arctan2(dy, dx))  # range [-180, 180]
 
-        # remove artificial jumps of 360° when the angle crosses ±180°
+        # remove artificial jumps of 360° when the angle crosses 180°
         return np.degrees(np.unwrap(np.radians(angle)))
     
     def bodypart_distance(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
@@ -98,20 +95,18 @@ class BehaviorBox:
         if coords is None:
             coords = self.coords
 
-        soft_pad = coords[bp1]
-        finger3 = coords[bp2]
+        bodypart1 = coords[bp1]
+        bodypart2 = coords[bp2]
 
-        dx = finger3["x"].to_numpy() - soft_pad["x"].to_numpy()
-        dy = finger3["y"].to_numpy() - soft_pad["y"].to_numpy()
+        dx = bodypart2["x"].to_numpy() - bodypart1["x"].to_numpy()
+        dy = bodypart2["y"].to_numpy() - bodypart1["y"].to_numpy()
 
         return np.sqrt(dx**2 + dy**2)
 
 
     def build_adjusted_boxes(self):
-        self.coords["angle"] = self.bodypart_angle()
-        self.coords["softpad_finger_distance"] = self.bodypart_distance()
-
-        
+        bp_angle = self.bodypart_angle()
+        bp_distance = self.bodypart_distance()
          
         return {
             "reach": (  # does not change

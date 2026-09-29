@@ -5,6 +5,7 @@ from pathlib import Path
 import yaml
 import pandas as pd
 from datetime import date, datetime
+from typing import get_type_hints
 
 from src.Base.Outcome import Outcome
 
@@ -13,9 +14,13 @@ class Trial:
     YAML_FIELDS: tuple = ()     # subset that gets written to the per-trial yaml
     STAGES: tuple = ()
 
+    clip_path: Path
+    yaml_path: Path
+    trial_outcomes: dict[str, Outcome]
+
     def __init__(self, clip_path: str, yaml_path: str = None):
-        self.clip_path = clip_path
-        self.yaml_path = Path(yaml_path) if yaml_path else Path(clip_path).with_suffix(".yaml")
+        self.clip_path: Path = clip_path
+        self.yaml_path: Path = Path(yaml_path) if yaml_path else Path(clip_path).with_suffix(".yaml")
 
         self.trial_outcomes: dict[str, Outcome] = {
                     name: Outcome(stage=name, order=i) 
@@ -36,9 +41,29 @@ class Trial:
         return {f: getattr(self, f, None) for f in self.FIELDS}
 
     def from_dict(self, data: dict):
+        types = get_type_hints(self.__class__)
+
         for f in self.YAML_FIELDS:
+
             if f in data:
-                setattr(self, f, data[f])
+                value = data[f]
+                field_type = types.get(f)
+
+                if value is not None:
+
+                    if f=="trial_outcomes": 
+                        value = {
+                                name: Outcome(stage=name, order=out["order"], success=out["success"], reason=out["reason"]) 
+                                for name, out in value.items()
+                            }
+
+                    if field_type is Path:
+                        value = Path(value)
+
+                    elif field_type is datetime:
+                        value = datetime.fromisoformat(value)
+
+                setattr(self, f, value)
         return self
 
     @staticmethod
