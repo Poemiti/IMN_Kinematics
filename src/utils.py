@@ -1,7 +1,7 @@
 # src/utils.py
 
 from pathlib import Path
-import time
+import time, os
 from functools import wraps
 
 def match_rule(meta, rules):
@@ -31,6 +31,15 @@ def make_dir(dir: Path) -> Path:
     return dir
 
 
+def save(path: Path, write_fn):
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        write_fn(tmp)
+        if tmp.stat().st_size == 0:
+            raise IOError(f"Refusing to write empty file: {path}")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)   # cleans up if anything failed
 
 
 ###################### decorator ###############################

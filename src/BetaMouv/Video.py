@@ -11,9 +11,10 @@ import numpy as np
 import pandas as pd
 from skimage.color import rgb2gray
 from dipy.align.transforms import TranslationTransform2D
-from dipy.align.imaffine import AffineRegistration
+from dipy.align.imaffine import AffineRegistration, MutualInformationMetric
 from skimage import img_as_ubyte
 import matplotlib.pyplot as plt
+from skimage.registration import phase_cross_correlation
 
 class Video(BaseVideo): 
 
@@ -43,27 +44,30 @@ class Video(BaseVideo):
         ref_img = imread(str(ref_path))
         img = imread(str(img_path))
 
-        # print("Reference:", ref_path)
-        # print("  shape:", ref_img.shape)
-
-        # print("Image:", img_path)
-        # print("  shape:", img.shape)
-
         ref_img = ref_img[450:, :, :]
         img = img[450:, :, :]
-
-        # print("After crop:")
-        # print("  ref_img:", ref_img.shape)
-        # print("  img:", img.shape)
         
         # shift calculation 
         
         ref_gray = rgb2gray(ref_img)
         img_gray = rgb2gray(img)
 
-        affreg = AffineRegistration()
-        transform = TranslationTransform2D()
-        tx = affreg.optimize(ref_gray, img_gray, transform, params0=None)
+        # affreg = AffineRegistration()
+        # transform = TranslationTransform2D()
+        # tx = affreg.optimize(ref_gray, img_gray, transform, params0=None)
+
+        # shift_matrix = tx.affine
+        # dx, dy = shift_matrix[0, 2], shift_matrix[1, 2]
+
+        metric = MutualInformationMetric(nbins=32, sampling_proportion=0.1)  # random 10% of voxels
+
+        affreg = AffineRegistration(
+            metric=metric,
+            level_iters=[100, 25],   # default is [10000, 1000, 100]
+            sigmas=[2.0, 0.0],
+            factors=[2, 1],          # start at half resolution
+        )
+        tx = affreg.optimize(ref_gray, img_gray, TranslationTransform2D(), params0=None)
 
         shift_matrix = tx.affine
         dx, dy = shift_matrix[0, 2], shift_matrix[1, 2]
@@ -91,7 +95,8 @@ class Video(BaseVideo):
             axes[1, 0].axis("off")
 
             shifted_img = tx.transform(img_gray)   # or apply dx,dy to the color img yourself
-            
+            # shifted_img = img_gray + (dx, dy)
+
             stereo2 = np.zeros((62, 512, 3), dtype=np.uint8)
             stereo2[..., 0] = ref_img[..., 0]
             stereo2[..., 1] = img_as_ubyte(np.clip(shifted_img, 0, 1))

@@ -13,13 +13,12 @@ from .BehaviorBox import BehaviorBox
 
 
 from pathlib import Path
-import yaml, time, joblib, sys, shutil
+import yaml, joblib, sys, shutil
 from src.utils import process_time
 from tqdm import tqdm
+from datetime import datetime
 
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 import src.utils as u
 import src.BetaMouv.gui.database_filter as Data_filter
@@ -95,244 +94,187 @@ class Project(BaseProject):
             else : 
                 print(f"Has already been splitted !")
 
-    def build_metadata(self): 
+    def build_metadata(self):
         print(f"""
         =============== Build Metadata ===============
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
-        print(f"{len(joblib_filenames)} joblib metadata files ({self.paths.trials_metadata})")
-        res = input("Overwrite those metadata ? (y/n/q) : ")
+        joblib_files = list(self.paths.trials_metadata.glob("*.joblib"))
+        print(f"{len(joblib_files)} joblib metadata files ({self.paths.trials_metadata})")
+        res = input("Overwrite (o), update (u) or quit (q) ? : ").strip().lower()
 
-        if res == "y" or res == "": 
-            print("\nOVEWRITING METADATA\n")
-            return self.init_metadata()
-
-        elif res == "n" : 
-            print("\nUPDATING METADATA\n")
-            return self.update_metadata()
-
-        elif res == "q" : 
-                    print("\nQuit !\n")
-                    sys.exit()
-
-        else : 
-            raise ValueError(f"'{res}' is not valid, must be 'y' or 'n'")
+        if res in ("o", ""):
+            return self._run_metadata(update=False)
+        if res == "u":
+            return self._run_metadata(update=True)
+        if res == "q":
+            print("\nQuit !\n")
+            sys.exit()
+        raise ValueError(f"'{res}' is not valid, must be 'y', 'n' or 'q'")
 
 
-    @process_time
-    def init_metadata(self): 
+    def _process_clip(self, clip_path, update: bool, shift_ctx: dict) -> Trial:
+        trial = Trial(clip_path=clip_path)
+        previous = None
 
-        dataset = Data_filter.load_database(self.paths.raw, self.paths.database, "video")
-        
-        shift_dir = u.make_dir(self.paths.data_root / "camera_shift")
-        raw_frames_dir = u.make_dir(shift_dir / "raw_frames")
-        superimpose_dir = u.make_dir(shift_dir / "superimposed")
-        ref_path = Path("/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/"
-                        "#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png")
-        shift_config: dict = {"rules":[]}
-        frames_paths = set()
-        
-        trials_by_group = {}
-
-        for clip_path in dataset["filename"].iloc[:]:
-
+        # 1. is the clip usable?
+        if update:
+            previous = Trial(clip_path=clip_path)
+            previous.load_yaml()
+            readable = previous.trial_outcomes["clip_openable"].success
+        else:
             clip = Video(clip_path)
-            trial = Trial(clip_path=clip_path)
+            readable = clip.is_openable and clip.is_readable
 
-            print("\nBuilding metadata:", clip.path.stem)
+        if not readable:
+            for stage in ("clip_openable", "view_match_task", "task"):
+                trial.set_success(stage=stage, success=False, reason="Clip not readable")
+            trial.set_group(laser_state="UNKNOWN", mvt_type="UNKNOWN")
+            return trial
 
-            if not clip.is_openable or not clip.is_readable: 
-                trial.set_success(stage="clip_openable", success=False, reason="Clip not readable")
-                trial.set_success(stage="view_match_task", success=False, reason="Clip not readable")
-                trial.set_success(stage="task", success=False, reason="Clip not readable")
+        trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
 
-                trial.set_group(laser_state="UNKNOWN", mvt_type="UNKNOWN")
-                trials_by_group.setdefault(trial.group, []).append(trial)
-                trial.save_yaml()
-                continue
-
-            trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
-
-            # get annotation number
-            annotation_meta = {
-                "laser_type": trial.laser_type, 
+        # 2. the ONLY step that differs: LED info
+        if update:
+            trial.update(
+                laser_state=previous.laser_state,
+                cue_type=previous.cue_type,
+                time_pad_off=previous.time_pad_off,
+                time_laser_on=previous.time_laser_on,
+                time_reward=previous.time_reward,
+            )
+        else:
+            rule_key = {
+                "laser_type": trial.laser_type,
                 "view": trial.camera_view,
                 "month": trial.file.date.month,
             }
-            label_studio_annotation = u.match_rule(annotation_meta, self.annotation_rules)
+            annotation = u.match_rule(rule_key, self.annotation_rules)
+            trial.set_led_info(Leds(video_path=clip_path, label_studio_annotation=annotation))
 
-            # get Leds info to tell the Laser state (LaserOn, LaserOff)
-            leds = Leds(video_path=clip_path, 
-                        label_studio_annotation=label_studio_annotation,)
+        # 3. shared logic
+        incompatible = (
+            (trial.camera_view == "left" and trial.cue_type == "CueL2") or
+            (trial.camera_view == "right" and trial.cue_type == "CueL1")
+        )
+        trial.set_success(
+            stage="view_match_task",
+            success=not incompatible,
+            reason=(f"'{trial.camera_view}' not compatible with '{trial.cue_type}'"
+                    if incompatible else "Compatible view with task"),
+        )
 
-            if (trial.camera_view == "left" and leds.cue_type == "CueL2") or \
-               (trial.camera_view == "right" and leds.cue_type == "CueL1") : 
-                trial.set_success(stage="view_match_task", success=False, reason=f"'{trial.camera_view}' not compatible with '{leds.cue_type}'")
-            else:
-                trial.set_success(stage="view_match_task", success=True, reason=f"Compatible view with task")
+        trial.set_task_success(self.project_info["laser_on_duration"])
+        trial.set_mvt_type(self.subject_info[trial.subject]["hemi"])
+        trial.set_group()
 
-            trial.set_led_info(leds)
-            trial.set_task_success(self.project_info["laser_on_duration"])
-            trial.set_mvt_type(self.subject_info[trial.subject]["hemi"])
-            trial.set_group()
+        self._add_camera_shift(trial, False, shift_ctx, save_superimposed=True)
 
-            # get camera shift info
+        pred_path = trial.file.path.parent / f"pred_results_{trial.name}.csv"
+        if pred_path.exists():
+            trial.update(pred_path=str(pred_path))
 
-            trial_comb = trial.group + "_" + trial.date.isoformat()
-            output_base = u.make_path(raw_frames_dir, f"{trial_comb}")
+        return trial
+
+
+    def _add_camera_shift(self, trial, update, ctx, save_superimposed: bool = False):
+        if update: 
+            shift_meta = {"date": trial.date.isoformat(), "group": trial.group}
+            shift_dict = u.match_rule(shift_meta, self.camera_shift_rules)
+            dx, dy = shift_dict["dx"], shift_dict["dy"]
+
+        else: 
+            tag = f"{trial.group}_{trial.date.isoformat()}"
+            base = u.make_path(ctx["raw_frames_dir"], tag)
             frame_num = 5
-            output_path = f"{output_base}_{frame_num}.png"
-            frames_paths.add(output_path)
+            frame_path = f"{base}_{frame_num}.png"
 
-            clip.extract_frames(frame_range=[frame_num], output_base=output_base)
-            dx, dy = clip.compute_camera_shift(ref_path=ref_path, img_path=output_path,
-                                                save_as=superimpose_dir / f"{trial_comb}.png")
-            
-            shift_config["rules"].append({
-                            "when": {
-                                "date": trial.date.isoformat(),
-                                "group": trial.group
-                            },
-                            "value": {
-                                "dx": dx.round(3).item(),
-                                "dy": dy.round(3).item()
-                            }
-                        })
-
-            trial.update(camera_shift=(dx, dy))
-
-            pred_path = trial.file.path.parent / f"pred_results_{trial.name}.csv"
-            if pred_path.exists(): 
-                trial.update(pred_path=str(pred_path))
-
-            trial.save_yaml()
-
-            # Add trial to its group
-            trials_by_group.setdefault(trial.group, []).append(trial)
-
-        n_trial=0
-        # Save one big joblib per group
-        print("\nTrials saved as joblibs: ")
-        for group, trials in trials_by_group.items():
-
-            joblib.dump(trials, u.make_path(self.paths.trials_metadata, f"{group}.joblib"))
-            print(f"  {group}: {len(trials)}")
-            n_trial+=len(trials)
-
-        print(f"\nTotal trials processed: {n_trial}")
-
-        # save camera shift info for later use 
-        with open(self.config_dir / "rules/camera_shift_rules.yaml", "w") as f: 
-                    yaml.safe_dump(shift_config, f) 
-
-
-    @process_time   
-    def update_metadata(self): 
-        """Update every metadata of each trial EXEPT the LEDs info"""
-
-        shift_dir = u.make_dir(self.paths.data_root / "camera_shift")
-        raw_frames_dir = u.make_dir(shift_dir / "raw_frames")
-        superimpose_dir = u.make_dir(shift_dir / "superimposed")
-        ref_path = Path("/home/ninjayu/IMN_Kinematics/data/BetaMouv/camera_shift/"
-                        "#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png")
-        shift_config: dict = {"rules":[]}
-        frames_paths = set()
-
-        updated_trials = {}
-        trials = list(self.paths.raw.rglob("*.mp4"))
-
-        for previous_trial_path in tqdm(trials, desc="Metadata update"): 
-
-            previous_trial = Trial(clip_path=previous_trial_path)
-            print(previous_trial.name)
-            previous_trial.load_yaml()
-
-            updated_trial = Trial(previous_trial_path)
-            # clip = Video(previous_trial.clip_path)
-            
-            # if not clip.is_openable or not clip.is_readable:
-            if not previous_trial.trial_outcomes["clip_openable"].success:  
-                updated_trial.set_success(stage="clip_openable", success=False, reason="Clip not readable")
-                updated_trial.set_success(stage="view_match_task", success=False, reason="Clip not readable")
-                updated_trial.set_success(stage="task", success=False, reason="Clip not readable")
-
-                updated_trial.set_group(laser_state="UNKNOWN", mvt_type="UNKNOWN")
-                updated_trials.setdefault(updated_trial.group, []).append(updated_trial)
-                updated_trial.save_yaml()
-                continue
-            
-            updated_trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
-
-
-            # get leds info FROM PREVIOUS TRIAL INFO
-            updated_trial.update(
-                            laser_state=previous_trial.laser_state,
-                            cue_type=previous_trial.cue_type,
-                            time_pad_off=previous_trial.time_pad_off,
-                            time_laser_on=previous_trial.time_laser_on,
-                            time_reward=previous_trial.time_reward,
-                        )
-
-            if (previous_trial.camera_view == "left" and previous_trial.cue_type == "CueL2") or \
-                (previous_trial.camera_view == "right" and previous_trial.cue_type == "CueL1") : 
-                updated_trial.set_success(stage="view_match_task", success=False, reason=f"'{updated_trial.camera_view}' X '{updated_trial.cue_type}'")
-            else: 
-                updated_trial.set_success(stage="view_match_task", success=True, reason=f"Compatible view X task")
-
-            updated_trial.set_task_success(self.project_info["laser_on_duration"])
-            updated_trial.set_mvt_type(self.subject_info[previous_trial.subject]["hemi"])
-            updated_trial.set_group()
-
-            # get camera shift info
-
-            clip = Video(updated_trial.clip_path)
-            trial_comb = updated_trial.group + "_" + updated_trial.date.isoformat()
-            output_base = u.make_path(raw_frames_dir, f"{trial_comb}")
-            frame_num = 5
-            output_path = f"{output_base}_{frame_num}.png"
-            frames_paths.add(output_path)
-
-            clip.extract_frames(frame_range=[frame_num], output_base=output_base)
-            dx, dy = clip.compute_camera_shift(ref_path=ref_path, img_path=output_path,
-                                                save_as=superimpose_dir / f"{trial_comb}.png")
+            clip = Video(trial.clip_path)
+            clip.extract_frames(frame_range=[frame_num], output_base=base)
+            dx, dy = clip.compute_camera_shift(
+                ref_path=ctx["ref_path"], img_path=frame_path,
+                save_as=ctx["superimpose_dir"] / f"{tag}.png" if save_superimposed else None,
+            )
             dx, dy = dx.round(3).item(), dy.round(3).item()
 
-            shift_config["rules"].append({
-                            "when": {
-                                "date": updated_trial.date.isoformat(),
-                                "group": updated_trial.group
-                            },
-                            "value": {
-                                "dx": dx,
-                                "dy": dy
-                            }
-                        })
+        ctx["rules"].append({
+            "when": {"date": trial.date.isoformat(), "group": trial.group},
+            "value": {"dx": dx, "dy": dy},
+        })
 
-            updated_trial.update(camera_shift=(dx, dy))
+        trial.update(camera_shift=(dx, dy))
 
-            pred_path = previous_trial.file.path.parent / f"pred_results_{previous_trial.name}.csv"
-            if pred_path.exists(): 
-                updated_trial.update(pred_path=str(pred_path))
 
-            updated_trial.save_yaml()
-            updated_trials.setdefault(updated_trial.group, []).append(updated_trial)
-            
 
-        n_trial=0
-        # Save one big joblib per group
-        print("\nTrials saved as joblibs: ")
-        for group, trials in updated_trials.items():
+    @process_time
+    def _run_metadata(self, update: bool):
+        shift_dir = u.make_dir(self.paths.data_root / "camera_shift")
+        ctx = {
+            "raw_frames_dir": u.make_dir(shift_dir / "raw_frames"),
+            "superimpose_dir": u.make_dir(shift_dir / "superimposed"),
+            "ref_path": self.project_info["shift_ref"],
+            "rules": [],
+        }
 
-            joblib.dump(trials, u.make_path(self.paths.trials_metadata, f"{group}.joblib"))
+        if update:
+            clip_paths = list(self.paths.raw.rglob("*.mp4"))
+        else:
+            clip_paths = list(Data_filter.load_database(
+                self.paths.raw, self.paths.database, "video")["filename"])
+
+        trials_by_group, errors = {}, {}
+
+        for clip_path in tqdm(clip_paths, desc="Metadata update" if update else "Metadata init"):
+            try:
+                trial = self._process_clip(clip_path, update, ctx)
+
+            except Exception as e:
+                errors[str(clip_path)] = repr(e)
+                continue
+            trials_by_group.setdefault(trial.group, []).append(trial)
+
+        #  report and decide BEFORE touching the disk 
+
+        n_ok = sum(len(t) for t in trials_by_group.values())
+        print(f"\n{n_ok} trials OK, {len(errors)} errors")
+
+        for p, e in list(errors.items())[:10]:
+            print(f"  {Path(p).name}: {e}")
+        if n_ok == 0 or len(errors) > 0.1 * len(clip_paths):
+            raise RuntimeError("Too many failures, nothing was written.")
+        if errors and input("Errors found. Save anyway? (y/n) : ").lower() != "y":
+            print("Aborted, nothing written.")
+            return
+
+        #  backup, then write 
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = self.paths.trials_metadata.parent / f"{self.paths.trials_metadata.name}_backup_{stamp}"
+        shutil.copytree(self.paths.trials_metadata, backup)
+        print(f"Backup: {backup}")
+
+        # save yaml
+
+        for trials in trials_by_group.values():
+            for t in trials:
+                t.save_yaml()      
+
+        # save joblib
+
+        for group, trials in trials_by_group.items():
+            u.save(u.make_path(self.paths.trials_metadata, f"{group}.joblib"),
+                   lambda p, t=trials: joblib.dump(t, p),)
             print(f"  {group}: {len(trials)}")
-            n_trial+=len(trials)
 
-        print(f"\nTotal trials processed: {n_trial}")
-        self.trialgroup.trials = updated_trials
+        u.save(self.config_dir / "rules/camera_shift_rules.yaml",
+               lambda p: p.write_text(yaml.safe_dump({"rules": ctx["rules"]})),)
 
+        self.trialgroup.trials = [trial
+                for trial_list in trials_by_group.values()
+                for trial in trial_list
+            ]
 
     @process_time
     def run_prediction(self): 
@@ -380,7 +322,6 @@ class Project(BaseProject):
         DIST_THRESH = self.project_info["distance_thresh"]
         GAP = self.project_info["gap_scale"]
         BODYPARTS = self.project_info["bodyparts"]
-        LEVER_POS = self.project_info["lever_position"]
 
         preprocess_records = []
 
@@ -396,9 +337,8 @@ class Project(BaseProject):
                     view=trial.camera_view,
                     bodypart="finger_3",
                     cm_per_pixel=trial.cm_per_pixel,
-                    lever_position=LEVER_POS,
+                    shift=trial.camera_shift,
                 )
-                traj.apply_shift(trial.camera_shift)
 
                 raw_coords = traj.compute_instant_metrics()
                 raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
@@ -417,12 +357,16 @@ class Project(BaseProject):
 
                 # set outlier stage outcome 
 
-                if n_interpolated_outliers == 0:
-                    traj.set_success("outlier", success=True, reason=f"0 outliers found")
-                    traj.set_success("validation", success=True, reason=f"0 outliers found")
+                if n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
+                    traj.set_success("outlier", success=True, reason=f"few outliers found")
+                    traj.set_success("validation", success=True, reason=f"few outliers found")
                     traj.clean_coords = raw_coords
 
-                elif n_interpolated_outliers >= MAX_OUTLIER:
+                elif n_raw_outliers >= 2*MAX_OUTLIER :
+                    traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER}")
+                    traj.set_success("validation", success=False, reason=f"outliers >= {MAX_OUTLIER}")
+                
+                elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
                     traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER}")
                     traj.set_success("validation", success=False, reason=f"outliers >= {MAX_OUTLIER}")
                 
@@ -431,6 +375,7 @@ class Project(BaseProject):
                     traj.plot_preprocess(
                                         interpolated_coords=traj.interpolated_coords,
                                         outlier_filtered_coords=outlier_filtered_coords,
+                                        nb_outlier=n_raw_outliers,
                                         raw_coords=raw_coords,
                                         time_pad_off=trial.time_pad_off,
                                         title=trial.name,

@@ -16,6 +16,9 @@ class Trajectory:
     file_cls = BaseFile
     STAGES = ()
 
+    XL, YL = (55, 230)   # lever position (px)
+    XP, YP = (315, 348)   # pad position (px)
+
     def __init__(self,
                 coords_path: Path,
                 view: str,
@@ -24,7 +27,7 @@ class Trajectory:
                 frame_width: int = 512,     # px
                 frame_height: int = 512,    #px
                 cm_per_pixel: float | None = None,
-                lever_position: float | None = None): 
+                shift: tuple[float] | None = (0,0)): 
 
         self.file = self.file_cls(coords_path)
 
@@ -36,6 +39,7 @@ class Trajectory:
         self.frame_width = frame_width
         self.frame_height = frame_height
         self.cm_per_pixel = cm_per_pixel
+        self.shift = shift
         self.stage_outcomes = {
             name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)
         }
@@ -47,7 +51,11 @@ class Trajectory:
 
         # setup coordinates into cartesian plane (bottom-left origin) + cm units
         self.coords = self._array_to_scaled_cartesian(self.raw_coords)
-        self.lever_position = self._point_to_scaled_cartesian(*lever_position) if lever_position else None
+
+        # apply camera shift
+        print(self.coords)
+        print(shift)
+        self.coords[["x", "y"]] + self.shift
 
     ############## Success function #############
 
@@ -250,6 +258,6 @@ class Trajectory:
             coords = self.coords
 
         xy = coords[["x", "y"]]
-        disp = xy - self.lever_position
+        disp = xy - (self.XL, self.YL)
 
         return np.linalg.norm(disp, axis=1)

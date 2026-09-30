@@ -2,7 +2,7 @@
 
 
 from pathlib import Path
-import yaml
+import yaml, os
 import pandas as pd
 from datetime import date, datetime
 from typing import get_type_hints
@@ -86,9 +86,21 @@ class Trial:
         return {f: self._serialize_value(getattr(self, f, None)) for f in fields}
 
     def save_yaml(self, path=None):
-        path = path or self.yaml_path
-        with open(path, "w") as f:
-            yaml.safe_dump(self.to_yaml_dict(), f, sort_keys=False)
+        path = Path(path or self.yaml_path)
+
+        # 1. everything that can fail happens BEFORE the file is touched
+        data = self.to_yaml_dict()
+        if not data:
+            raise ValueError(f"Trial '{self.name}': refusing to save empty YAML")
+        text = yaml.safe_dump(data, sort_keys=False)      # returns a string, no file involved
+
+        # 2. write to a temp file, then atomically replace
+        tmp = path.with_name(path.name + ".tmp")
+        with open(tmp, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)       
 
     def load_yaml(self, path=None):
         path = path or self.yaml_path
