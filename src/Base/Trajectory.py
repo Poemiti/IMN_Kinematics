@@ -49,13 +49,13 @@ class Trajectory:
         self.raw_coords = self.raw_coords[self.bodypart].copy()
         self.raw_coords = self.raw_coords.assign(t=np.arange(len(self.raw_coords)) / self.fps)  # add time column
 
+        # apply camera shift BEFORE SCALING (because shift is in pixel)
+        self.raw_coords[["x", "y"]] = self.raw_coords[["x", "y"]] + self.shift
+
         # setup coordinates into cartesian plane (bottom-left origin) + cm units
         self.coords = self._array_to_scaled_cartesian(self.raw_coords)
 
-        # apply camera shift
-        print(self.coords)
-        print(shift)
-        self.coords[["x", "y"]] + self.shift
+        
 
     ############## Success function #############
 
