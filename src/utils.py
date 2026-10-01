@@ -1,7 +1,8 @@
 # src/utils.py
 
 from pathlib import Path
-import time, os
+import time, os, datetime as dt, csv
+from collections import Counter
 from functools import wraps
 
 def match_rule(meta, rules):
@@ -40,6 +41,36 @@ def save(path: Path, write_fn):
         os.replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)   # cleans up if anything failed
+
+
+
+def _save_error_report(output_dir, errors: dict, update: bool):
+    if not errors:
+        return None
+
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = output_dir / f"errors_{'update' if update else 'init'}_{stamp}"
+
+    # CSV: one line per clip, sorted by error type (open in Excel/pandas)
+    with open(base.with_suffix(".csv"), "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["clip", "error_type", "message"])
+        for path, e in sorted(errors.items(), key=lambda kv: (kv[1]["type"], kv[1]["message"])):
+            writer.writerow([path, e["type"], e["message"]])
+
+    # TXT: full tracebacks, to find where the error comes from
+    with open(base.with_suffix(".txt"), "w") as f:
+        for path, e in errors.items():
+            f.write(f"{'=' * 80}\n{path}\n{e['traceback']}\n")
+
+    # short summary in the terminal: most frequent errors first
+    counts = Counter((e["type"], e["message"][:80]) for e in errors.values())
+    print(f"\n{len(errors)} errors, most frequent causes:")
+    for (etype, msg), n in counts.most_common(5):
+        print(f"  {n:4d} x {etype}: {msg}")
+    print(f"Report saved: {base}.csv / .txt")
+    return base
+
 
 
 ###################### decorator ###############################
