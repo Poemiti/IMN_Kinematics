@@ -37,44 +37,44 @@ class Video(BaseVideo):
         cap.release()
 
 
-    def compute_camera_shift(self, ref_path, img_path = None, save_as = None):
-        if img_path is None:
-            img_path = self.path
+    def compute_camera_shift(self, view: str, ref_path: str, img_path: str, save_as = None):
+        def load_image(path: str):
+            path = Path(path)
+            if not path.is_file():
+                raise FileNotFoundError(f"'{path}' does not exist, can't open")
+            return imread(str(path))
 
-        ref_img = imread(str(ref_path))
-        img = imread(str(img_path))
+        frame_width = 512
+        y_top_lim = 400
+        y_bottom_lim = frame_width
 
-        ref_img = ref_img[450:, :, :]
-        img = img[450:, :, :]
-        
+        ref_img = load_image(ref_path)
+        img = load_image(img_path)
+
+        is_flip = view == "right"
+        if is_flip :
+            img = img[:, ::-1]                 # flip x axis
+            print("flip")
+
+        ref_img_cropped = ref_img[y_top_lim : y_bottom_lim]   # crop ref
+        img_cropped = img[y_top_lim : y_bottom_lim]   
+
         # shift calculation 
         
-        ref_gray = rgb2gray(ref_img)
-        img_gray = rgb2gray(img)
+        ref_gray = rgb2gray(ref_img_cropped)
+        img_gray = rgb2gray(img_cropped)
 
-        # affreg = AffineRegistration()
-        # transform = TranslationTransform2D()
-        # tx = affreg.optimize(ref_gray, img_gray, transform, params0=None)
-
-        # shift_matrix = tx.affine
-        # dx, dy = shift_matrix[0, 2], shift_matrix[1, 2]
-
-        metric = MutualInformationMetric(nbins=32, sampling_proportion=0.1)  # random 10% of voxels
-
-        affreg = AffineRegistration(
-            metric=metric,
-            level_iters=[100, 25],   # default is [10000, 1000, 100]
-            sigmas=[2.0, 0.0],
-            factors=[2, 1],          # start at half resolution
-        )
-        tx = affreg.optimize(ref_gray, img_gray, TranslationTransform2D(), params0=None)
+        affreg = AffineRegistration()
+        transform = TranslationTransform2D()
+        tx = affreg.optimize(ref_gray, img_gray, transform, params0=None)
 
         shift_matrix = tx.affine
         dx, dy = shift_matrix[0, 2], shift_matrix[1, 2]
 
         if save_as: 
+            from matplotlib.patches import Rectangle
             
-            fig, axes = plt.subplots(2, 2, figsize=(8, 4))
+            fig, axes = plt.subplots(2, 2, figsize=(20, 20))
 
             axes[0, 0].imshow(ref_img, cmap="gray")
             axes[0, 0].set_title("ref img")
@@ -84,9 +84,15 @@ class Video(BaseVideo):
             axes[0, 1].set_title("img")
             axes[0, 1].axis("off")
 
+            # Rectangle: (x, y), width, height
+            rect = Rectangle((0, y_top_lim), frame_width, y_bottom_lim,
+                linewidth=5, edgecolor="red", facecolor="none")
+
+            axes[0, 1].add_patch(rect)
+
             # Red = reference
             # Green = current frame
-            stereo = np.zeros((62, 512, 3), dtype=np.uint8)
+            stereo = np.zeros((frame_width, frame_width, 3), dtype=np.uint8)
             stereo[..., 0] = ref_img[..., 0]
             stereo[..., 1] = img[..., 1]
 
@@ -94,16 +100,15 @@ class Video(BaseVideo):
             axes[1, 0].set_title("superimposed")
             axes[1, 0].axis("off")
 
-            shifted_img = tx.transform(img_gray)   # or apply dx,dy to the color img yourself
-            # shifted_img = img_gray + (dx, dy)
+            img_gray = rgb2gray(img)
+            shifted_img = tx.transform(img_gray, sampling_grid_shape=img_gray.shape[:2])
 
-            stereo2 = np.zeros((62, 512, 3), dtype=np.uint8)
+            stereo2 = np.zeros((frame_width, frame_width, 3), dtype=np.uint8)
             stereo2[..., 0] = ref_img[..., 0]
             stereo2[..., 1] = img_as_ubyte(np.clip(shifted_img, 0, 1))
     
-    
             axes[1, 1].imshow(stereo2)
-            axes[1, 1].set_title(f"shifted (dx={dx:.1f}, dy={dy:.1f})")
+            axes[1, 1].set_title(f"shifted (dx={dx:.1f}, dy={dy:.1f})\nflip={is_flip}")
             axes[1, 1].axis("off")
     
             fig.tight_layout()
