@@ -63,7 +63,15 @@ class TrialGroup:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         for group, records in by_group.items():
-            joblib.dump(records, output_dir / f"{group}.joblib")
+            path = output_dir / f"{group}.joblib"
+            tmp = path.with_name(path.name + ".tmp")
+            try:
+                joblib.dump(records, tmp)
+                if tmp.stat().st_size == 0:
+                    raise IOError(f"Refusing to write empty file: {path}")
+                os.replace(tmp, path)
+            finally:
+                tmp.unlink(missing_ok=True)
 
 
 
