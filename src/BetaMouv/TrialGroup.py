@@ -3,6 +3,8 @@
 
 from src.Base.TrialGroup import TrialGroup as BaseTrialGroup
 from .Trial import Trial
+from .Trajectory import Trajectory
+
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
@@ -50,9 +52,9 @@ class TrialGroup(BaseTrialGroup):
         print("Coordinates cropped from pad_off to end of laser stimulation !")
 
 
-    def buils_timeseries_df(self, save_as, init: bool = False):
+    def buils_timeseries_df(self, save_as, bodypart: str = "finger_3", init: bool = False):
         if init: 
-            self._timeseries_df = self.timeseries_df()
+            self._timeseries_df = self.timeseries_df(bodypart)
             self._timeseries_df.to_csv(save_as)
             return 
               
@@ -61,7 +63,7 @@ class TrialGroup(BaseTrialGroup):
             self._timeseries_df = pd.read_csv(save_as)
             return
 
-        self._timeseries_df = self.timeseries_df()
+        self._timeseries_df = self.timeseries_df(bodypart)
         self._timeseries_df.to_csv(save_as)
 
 
@@ -93,7 +95,7 @@ class TrialGroup(BaseTrialGroup):
             records = []
             for trial in self.trials:
                 for bodypart, traj in trial.trajectories.items():
-                    for stage, outcome in traj.trial_outcomes.items():
+                    for stage, outcome in traj.stage_outcomes.items():
 
                         records.append(trial.identity() | {
                             "bodypart": bodypart,
@@ -113,7 +115,7 @@ class TrialGroup(BaseTrialGroup):
             records = []
 
             for trial in self.trials:
-                if not trial._is_successful() :
+                if not trial.is_valid() :
                     continue
 
                 records.append(trial.identity() | {
@@ -125,20 +127,25 @@ class TrialGroup(BaseTrialGroup):
         return self._scalar_df
 
 
-    def timeseries_df(self) -> pd.DataFrame:
+    def timeseries_df(self, bodypart: str = "finger_3") -> pd.DataFrame:
         """Many rows per trial (one per frame/timestamp) : for plots over time."""
 
-        if self._timeseries_df is None or self._timeseries_df.columns:
+        if self._timeseries_df is None:
             frames = []
 
             for trial in tqdm(self.trials, desc="Building timeseries_df"):
-                if not trial._is_successful() :
+                if not trial.is_valid() :
                     continue
 
-                df = trial.coords.copy()
+                traj: Trajectory = trial.trajectories.get(bodypart)
+
+                if not traj.is_valid(): 
+                    continue
+
+                df = traj.clean_coords
 
                 if self.crop_laser_period: 
-                    df = trial.traj.crop_xy(df, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
+                    df = traj.crop_xy(traj.clean_coords, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
 
                 for col, val in trial.identity().items():
                     df[col] = val
@@ -202,14 +209,34 @@ class TrialGroup(BaseTrialGroup):
 
         print(f"Report saved to: {save_as}")
 
+
+    def trajectories_success_rate(self, save_as):
+
+        df = self.bodypart_success_df()
+
+        g = sns.catplot(
+            data=df, kind="count",
+            x="reason",
+            col="stage", row="bodypart",
+            hue="success", palette=BOOL_PALETTE,
+            sharex=False
+        )
         
+        g.set_xticklabels(rotation=45, ha="right")
+        g.set_axis_labels("", "Number of trials")
+        g.set_titles(col_template="{col_name}", row_template="{row_name}")
+        g.figure.suptitle("Trajectory success rate by stage")
+        g.figure.subplots_adjust(top=0.80)
+
+        g.figure.savefig(save_as, bbox_inches="tight")
+        plt.show()
+        plt.close(g.figure)
+
+        print(f"Report saved to: {save_as}")
 
 
-    def lineplot_all_traj(self, save_as):
-        data = self._timeseries_df
-        
-        if data is None: 
-            data = self.timeseries_df() 
+    def lineplot_all_traj(self, save_as, bodypart: str = "finger_3"):
+        data = self.timeseries_df(bodypart)
 
         fig, ax = plt.subplots()
 
@@ -225,6 +252,11 @@ class TrialGroup(BaseTrialGroup):
             legend=False, ax=ax
         )
 
+        XL, YL = (55, 230)   # lever position (px)
+        XP, YP = (315, 348)   # pad position (px)
+        
+        plt.plot()
+
         mean_data =(data
                     .groupby("index_order", as_index=False)[["x", "y"]]
                     .mean())
@@ -238,7 +270,7 @@ class TrialGroup(BaseTrialGroup):
             label="Mean trajectory", estimator=None
         )
 
-        plt.title(f"{self.group_name}\n n_trial={data['name'].nunique()}")
+        plt.title(f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
         plt.xlabel("x (cm)")
         plt.ylabel("y (cm)")
         plt.axis("equal")
@@ -308,7 +340,7 @@ class TrialGroup(BaseTrialGroup):
         plt.close()
 
 
-    def plot_tendency(self, value , save_as): 
+    def plot_tendency(self, value , save_as, bodypart: str = "finger_3"): 
         """
         Plot velocity tendency with error span around the average.
         Custome error functions available : 
@@ -321,7 +353,7 @@ class TrialGroup(BaseTrialGroup):
         data = self._timeseries_df
 
         if data is None: 
-            data = self.timeseries_df()            
+            data = self.timeseries_df(bodypart)            
 
         g = sns.FacetGrid(
             data=data,
@@ -344,7 +376,7 @@ class TrialGroup(BaseTrialGroup):
 
         g.set_titles(col_template="{col_name}", row_template="{row_name}")
         g.set_axis_labels("Time (sec)", value)
-        g.figure.suptitle(f"{value} over time\nNumber of trials: {len(data.groupby('name'))}", ha='center')
+        g.figure.suptitle(f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}", ha='center')
         g.figure.subplots_adjust(top=0.8)
 
         g.savefig(save_as)

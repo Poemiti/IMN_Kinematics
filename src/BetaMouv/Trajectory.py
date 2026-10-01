@@ -271,7 +271,6 @@ class Trajectory(BaseTrajectory):
                         interpolated_coords, 
                         outlier_filtered_coords,
                         raw_coords,
-                        nb_outlier,
                         time_pad_off,
                         title, 
                         save_as):
@@ -350,9 +349,6 @@ class Trajectory(BaseTrajectory):
             ylim=(0, self.frame_height * self.cm_per_pixel)
             )
         ax_traj.legend()
-
-        title = title[:len(title)//2] + "\n" + title[len(title)//2:]
-        title = title + f" - n_outlier={nb_outlier}"
         fig.suptitle(title, wrap=True)
 
         plt.tight_layout()
