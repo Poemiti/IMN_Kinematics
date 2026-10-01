@@ -13,7 +13,7 @@ from .BehaviorBox import BehaviorBox
 
 
 from pathlib import Path
-import yaml, joblib, sys, shutil
+import yaml, joblib, sys, shutil, traceback
 from src.utils import process_time
 from tqdm import tqdm
 from datetime import datetime
@@ -170,7 +170,7 @@ class Project(BaseProject):
         trial.set_mvt_type(self.subject_info[trial.subject]["hemi"])
         trial.set_group()
 
-        self._add_camera_shift(trial, False, shift_ctx, save_superimposed=True)
+        self._add_camera_shift(trial, update, shift_ctx, save_superimposed=True)
 
         pred_path = trial.file.path.parent / f"pred_results_{trial.name}.csv"
         if pred_path.exists():
@@ -180,29 +180,40 @@ class Project(BaseProject):
 
 
     def _add_camera_shift(self, trial, update, ctx, save_superimposed: bool = False):
+
+        def read_shift_dict(shift_dict): 
+            shift_meta = {"date": trial.date.isoformat(), "subject": trial.subject} 
+            shift = u.match_rule(shift_meta, shift_dict)
+            dx, dy = shift["dx"], shift["dy"]
+            return dx, dy
+        
         if update: 
-            shift_meta = {"date": trial.date.isoformat(), "group": trial.group}
-            shift_dict = u.match_rule(shift_meta, self.camera_shift_rules)
-            dx, dy = shift_dict["dx"], shift_dict["dy"]
+            dx, dy = read_shift_dict(self.camera_shift_rules)
 
         else: 
-            tag = f"{trial.group}_{trial.date.isoformat()}"
+            tag = f"{trial.subject}_{trial.date.isoformat()}"
             base = u.make_path(ctx["raw_frames_dir"], tag)
             frame_num = 5
             frame_path = f"{base}_{frame_num}.png"
 
-            clip = Video(trial.clip_path)
-            clip.extract_frames(frame_range=[frame_num], output_base=base)
-            dx, dy = clip.compute_camera_shift(
-                ref_path=ctx["ref_path"], img_path=frame_path,
-                save_as=ctx["superimpose_dir"] / f"{tag}.png" if save_superimposed else None,
-            )
-            dx, dy = dx.round(3).item(), dy.round(3).item()
+            if frame_path in ctx["frame_paths_list"] :
+                dx, dy = read_shift_dict(ctx)
 
-        ctx["rules"].append({
-            "when": {"date": trial.date.isoformat(), "group": trial.group},
-            "value": {"dx": dx, "dy": dy},
-        })
+            else :
+                clip = Video(trial.clip_path)
+                clip.extract_frames(frame_range=[frame_num], output_base=base)
+                dx, dy = clip.compute_camera_shift(view=trial.camera_view,
+                    ref_path=ctx["ref_path"], img_path=frame_path,
+                    save_as=ctx["superimpose_dir"] / f"{tag}.png" if save_superimposed else None,
+                )
+                dx, dy = dx.round(3).item(), dy.round(3).item()
+
+                ctx["rules"].append({
+                            "when": {"date": trial.date.isoformat(), "subject": trial.subject},
+                            "value": {"dx": dx, "dy": dy},
+                        })
+
+                ctx["frame_paths_list"].append(frame_path)
 
         trial.update(camera_shift=(dx, dy))
 
@@ -216,6 +227,7 @@ class Project(BaseProject):
             "superimpose_dir": u.make_dir(shift_dir / "superimposed"),
             "ref_path": self.project_info["shift_ref"],
             "rules": [],
+            "frame_paths_list": [],
         }
 
         if update:
@@ -229,13 +241,20 @@ class Project(BaseProject):
         for clip_path in tqdm(clip_paths, desc="Metadata update" if update else "Metadata init"):
             try:
                 trial = self._process_clip(clip_path, update, ctx)
-
+                trial.to_yaml_dict()                   # strict check, nothing written yet
             except Exception as e:
-                errors[str(clip_path)] = repr(e)
+                errors[str(clip_path)] = {
+                    "type": type(e).__name__,
+                    "message": str(e),
+                    "traceback": traceback.format_exc(),
+                }
                 continue
             trials_by_group.setdefault(trial.group, []).append(trial)
 
         #  report and decide BEFORE touching the disk 
+
+        u._save_error_report(output_dir=u.make_dir(self.paths.data_root / "logs"), 
+                             errors=errors, update=update)
 
         n_ok = sum(len(t) for t in trials_by_group.values())
         print(f"\n{n_ok} trials OK, {len(errors)} errors")
@@ -255,21 +274,22 @@ class Project(BaseProject):
         shutil.copytree(self.paths.trials_metadata, backup)
         print(f"Backup: {backup}")
 
+        # save camera shift rules
+        u.save(self.config_dir / "rules/camera_shift_rules.yaml",
+                       lambda p: p.write_text(yaml.safe_dump({"rules": ctx["rules"]})),)
+
         # save yaml
 
-        for trials in trials_by_group.values():
-            for t in trials:
+        print("\nSaving YAML")
+        for group, trials in trials_by_group.items():
+            for t in tqdm(trials, desc=f"Saving {group}"):
                 t.save_yaml()      
 
         # save joblib
 
-        for group, trials in trials_by_group.items():
+        for group, trials in tqdm(trials_by_group.items(), desc="Saving joblib"):
             u.save(u.make_path(self.paths.trials_metadata, f"{group}.joblib"),
                    lambda p, t=trials: joblib.dump(t, p),)
-            print(f"  {group}: {len(trials)}")
-
-        u.save(self.config_dir / "rules/camera_shift_rules.yaml",
-               lambda p: p.write_text(yaml.safe_dump({"rules": ctx["rules"]})),)
 
         self.trialgroup.trials = [trial
                 for trial_list in trials_by_group.values()
@@ -310,7 +330,7 @@ class Project(BaseProject):
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
-        preprocess_dir = u.make_dir(self.paths.results_root / "preprocess")
+        preprocess_dir = u.make_dir(self.paths.analysis(self.trialgroup.keep_val) / "preprocess")
         preprocess_data_path = preprocess_dir / "preprocess_data.csv"
         outlier_fig_path = preprocess_dir / "outlier_distri.png"
 
@@ -356,29 +376,33 @@ class Project(BaseProject):
                 preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_interpolated_outliers, "type": "interpolated"})
 
                 # set outlier stage outcome 
-
-                if n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
-                    traj.set_success("outlier", success=True, reason=f"few outliers found")
-                    traj.set_success("validation", success=True, reason=f"few outliers found")
+                if n_raw_outliers == 0 :
+                    traj.set_success("outlier", success=True, reason=f"0 out")
+                    traj.set_success("validation", success=True, reason=f"0 out")
                     traj.clean_coords = raw_coords
 
+                if n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
+                    traj.set_success("outlier", success=True, reason=f"few out")
+                    traj.set_success("validation", success=True, reason=f"few out")
+                    traj.clean_coords = traj.interpolated_coords
+
                 elif n_raw_outliers >= 2*MAX_OUTLIER :
-                    traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER}")
-                    traj.set_success("validation", success=False, reason=f"outliers >= {MAX_OUTLIER}")
+                    traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
+                    traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
                 
                 elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
-                    traj.set_success("outlier", success=False, reason=f"outliers >= {MAX_OUTLIER}")
-                    traj.set_success("validation", success=False, reason=f"outliers >= {MAX_OUTLIER}")
+                    traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
+                    traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
                 
                 else:
-                    traj.set_success("outlier", success=False, reason=f"outliers <= {MAX_OUTLIER}, need validation")
+                    traj.set_success("outlier", success=False, reason=f"out<={MAX_OUTLIER}")
+                    
                     traj.plot_preprocess(
                                         interpolated_coords=traj.interpolated_coords,
                                         outlier_filtered_coords=outlier_filtered_coords,
-                                        nb_outlier=n_raw_outliers,
                                         raw_coords=raw_coords,
                                         time_pad_off=trial.time_pad_off,
-                                        title=trial.name,
+                                        title=f"{trial.group}\nn_out: {n_raw_outliers}|{n_interpolated_outliers} - shift: {trial.camera_shift}",
                                         save_as=interpolation_dir / f"interpolation_{bodypart}_{trial.name}.png",
                                     )
                     
@@ -386,6 +410,15 @@ class Project(BaseProject):
 
         outlier_df = pd.DataFrame(preprocess_records)
         outlier_df.to_csv(preprocess_data_path)
+
+        #  backup, then write 
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = self.paths.trials_metadata.parent / f"{self.paths.trials_metadata.name}_backup_{stamp}"
+        shutil.copytree(self.paths.trials_metadata, backup)
+        print(f"Backup: {backup}")
+
+        # save joblib
 
         self.trialgroup.save(self.paths.trials_metadata)
         # self.trialgroup.distri_outlier(data=outlier_df, save_as=outlier_fig_path)
@@ -402,7 +435,7 @@ class Project(BaseProject):
 
         BODYPARTS = self.project_info["bodyparts"]
         
-        preprocess_dir = self.paths.results_root / "preprocess" / "interpolation"
+        preprocess_dir = u.make_dir(self.paths.analysis(self.trialgroup.keep_val) / "preprocess" / "interpolation")
         print("\n-->", len(list(preprocess_dir.iterdir())), "FILES TO VALIDATE")
         trial_states = Validator.load_preprocess_validator(preprocess_dir)
 
@@ -420,13 +453,13 @@ class Project(BaseProject):
                 traj: Trajectory = trial.trajectories.get(bodypart)
 
                 if state == "rejected":
-                    traj.set_success(stage="validation", success=False, reason="manually rejected")
+                    traj.set_success(stage="validation", success=False, reason="man reject")
  
                 elif state == "raw":
-                    traj.set_success(stage="validation", success=True, reason="manually accepted, raw")
+                    traj.set_success(stage="validation", success=True, reason="man acc, raw")
                     traj.clean_coords = traj.coords
                 else:
-                    traj.set_success(stage="validation", success=True, reason="manually accepted, interpolated")
+                    traj.set_success(stage="validation", success=True, reason="man acc, inter")
                     traj.clean_coords = traj.interpolated_coords
 
         self.trialgroup.save(self.paths.trials_metadata)
@@ -478,30 +511,22 @@ class Project(BaseProject):
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
-
-        # self.define_camera_shift()
         
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
 
-        # trial = self.trialgroup.trials[0]
-        # vid = Video(trial.clip_path)
-        # vid.annotate_video(output_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",)
-        # vid.extract_frames(frame_range=range(0, 150), 
-        #                    video_path=self.paths.data_root / "annotated_vid" / f"annotated_{trial.name}.mp4",
-        #                    output_base=u.make_path(self.paths.data_root / "annotated_vid" , "frame"))
+        bodypart = "finger_3"
 
-        # self.trialgroup.crop_coords(True)
-        # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / "timeseries_df.csv")
-        # print(self.trialgroup._timeseries_df)
+        self.trialgroup.crop_coords(True)
+        self.trialgroup.buils_timeseries_df(init=True, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
-        # for val in ["instant_velocity", "instant_acc", "lever_distance"]:
-        #     self.trialgroup.plot_tendency(
-        #         value=val,
-        #         save_as=u.make_path(analysis_dir / "tendency", f"{val}.svg")
-        #     )
-        
-        # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / "all_traj.svg")
+        self.trialgroup.lineplot_all_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
+        self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
-        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+        for val in ["instant_velocity", "instant_acc", "lever_distance"]:
+            self.trialgroup.plot_tendency(
+                value=val,
+                save_as=u.make_path(analysis_dir / "tendency", f"{val}.svg")
+            )
         
-        
+        # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+    
