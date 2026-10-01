@@ -9,6 +9,11 @@ from typing import get_type_hints
 
 from src.Base.Outcome import Outcome
 
+try:
+    from yaml import CSafeDumper as SafeDumper
+except ImportError:
+    from yaml import SafeDumper
+
 class Trial:
     FIELDS: tuple = ()          # everything — goes into joblib as-is
     YAML_FIELDS: tuple = ()     # subset that gets written to the per-trial yaml
@@ -57,7 +62,7 @@ class Trial:
                                 for name, out in value.items()
                             }
 
-                    if field_type is Path:
+                    elif field_type is Path:
                         value = Path(value)
 
                     elif field_type is datetime:
@@ -88,19 +93,25 @@ class Trial:
     def save_yaml(self, path=None):
         path = Path(path or self.yaml_path)
 
-        # 1. everything that can fail happens BEFORE the file is touched
+        # 1. everything that can fail happens BEFORE any file is touched
         data = self.to_yaml_dict()
         if not data:
             raise ValueError(f"Trial '{self.name}': refusing to save empty YAML")
-        text = yaml.safe_dump(data, sort_keys=False)      # returns a string, no file involved
+        text = yaml.dump(data, Dumper=SafeDumper, sort_keys=False)
+        if not text.strip():
+            raise ValueError(f"Trial '{self.name}': YAML text is empty")
 
-        # 2. write to a temp file, then atomically replace
+        # 2. write to a temp file, then swap it in
         tmp = path.with_name(path.name + ".tmp")
-        with open(tmp, "w") as f:
-            f.write(text)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)       
+        try:
+            with open(tmp, "w") as f:
+                f.write(text)
+            # the file is closed here, so the size on disk is real
+            if tmp.stat().st_size == 0:
+                raise IOError(f"Refusing to write empty file: {path}")
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)   
 
     def load_yaml(self, path=None):
         path = path or self.yaml_path
