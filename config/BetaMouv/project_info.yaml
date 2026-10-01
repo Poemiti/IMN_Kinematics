@@ -7,4 +7,4 @@ gap_scale: 0.15 # for outlier detection
 distance_thresh: 0.6 # for outlier detection (cm)
 max_outlier: 10 
 lever_position: [55, 230]
-shift_ref: "/home/poemiti/IMN_Kinematics/data/BetaMouv/camera_shift/#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png"
+shift_ref: "./data/BetaMouv/camera_shift/#517_CHR_CONTRA_Beta_RightHemi_leftView_high_LaserOff_2024-07-05.png"
