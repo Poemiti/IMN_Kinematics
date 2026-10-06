@@ -52,7 +52,7 @@ class TrialGroup(BaseTrialGroup):
         print("Coordinates cropped from pad_off to end of laser stimulation !")
 
 
-    def buils_timeseries_df(self, save_as, bodypart: str = "finger_3", init: bool = False):
+    def buils_timeseries_df(self, save_as, bodypart: str = "finger_3", init: bool = True):
         if init: 
             self._timeseries_df = self.timeseries_df(bodypart)
             self._timeseries_df.to_csv(save_as)
@@ -134,7 +134,7 @@ class TrialGroup(BaseTrialGroup):
             frames = []
 
             for trial in tqdm(self.trials, desc="Building timeseries_df"):
-                if not trial.is_valid() :
+                if not trial.is_valid() or trial.laser_intensity == "incompatible":
                     continue
 
                 traj: Trajectory = trial.trajectories.get(bodypart)
@@ -148,11 +148,10 @@ class TrialGroup(BaseTrialGroup):
                     df = traj.crop_xy(traj.clean_coords, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
 
                 for col, val in trial.identity().items():
-                    df[col] = val
+                    df[col] = [val] * len(df)
 
-                df = df.loc[df["laser_intensity"] != "incompatible"]
                 df["index_order"] = range(len(df))
-                df["relative_t"] = (df["t"] - trial.time_pad_off).round(2)
+                df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
 
                 frames.append(df)
 
@@ -249,13 +248,8 @@ class TrialGroup(BaseTrialGroup):
             sort=False,
             color="gray",
             alpha=0.2,
-            legend=False, ax=ax
+            legend=False, ax=ax, zorder=-1
         )
-
-        XL, YL = (55, 230)   # lever position (px)
-        XP, YP = (315, 348)   # pad position (px)
-        
-        plt.plot()
 
         mean_data =(data
                     .groupby("index_order", as_index=False)[["x", "y"]]
@@ -267,19 +261,72 @@ class TrialGroup(BaseTrialGroup):
             color="red",
             linewidth=3,
             sort=False,
-            label="Mean trajectory", estimator=None
+            label="Mean trajectory", estimator=None, 
         )
 
+        # plot lever + pad
+
+        XL, YL = (55, 282)   # lever position (px)
+        XP, YP = (250, 164)  # pad position (px)
+        
+        frame_width_px = 512
+        frame_width_cm = 8.7
+        cm_per_pixel = frame_width_cm / frame_width_px
+
+        ax.scatter(x=XL*cm_per_pixel, y=YL*cm_per_pixel, color="k", zorder=1, lw=5)
+        ax.hlines(y=YP*cm_per_pixel, xmin=90*cm_per_pixel, xmax=XP*cm_per_pixel, color="k", lw=5)
+        
         plt.title(f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
         plt.xlabel("x (cm)")
         plt.ylabel("y (cm)")
-        plt.axis("equal")
-        plt.legend()
 
         plt.savefig(save_as, bbox_inches="tight", dpi=300)
         plt.show()
         plt.close()
 
+
+    def lineplot_traj_per_indentity(self, save_as, bodypart: str = "finger_3",): 
+        data = self.timeseries_df(bodypart)
+
+        def plot_mean(data, **kwargs):
+            m = (data
+                .groupby("index_order", as_index=False)[["x", "y"]]
+                .mean()
+                .sort_values("index_order"))
+            plt.gca().plot(m["x"], m["y"], 
+                           color="black", linewidth=4, label="Mean trajectory")
+
+
+        g = sns.FacetGrid(
+                    data=data,
+                    margin_titles=True,
+                    col="laser_type", 
+                    row="laser_intensity", 
+                    height=6
+                    )
+
+        # Individual trajectories
+        g.map_dataframe(sns.lineplot,
+            x="x", y="y",
+            units="name",
+            estimator=None, sort=False,
+            alpha=0.6, 
+            hue="laser_state", style="laser_state",
+            palette=LASER_STATE_PALETTE, dashes=LASER_STATE_DASH,
+            legend=False,
+        )
+
+        # Mean trajectories 
+        g.map_dataframe(plot_mean)
+
+        g.set_titles(col_template="{col_name}", row_template="{row_name}")
+        g.figure.suptitle(f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
+        g.set_axis_labels("x (cm)", "y (cm)")
+        g.figure.subplots_adjust(top=0.90)
+
+        plt.savefig(save_as, bbox_inches="tight", dpi=300)
+        plt.show()
+        plt.close()
 
 
     def distri_outlier(self, data: pd.DataFrame, save_as):
@@ -340,7 +387,7 @@ class TrialGroup(BaseTrialGroup):
         plt.close()
 
 
-    def plot_tendency(self, value , save_as, bodypart: str = "finger_3"): 
+    def plot_tendency(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False): 
         """
         Plot velocity tendency with error span around the average.
         Custome error functions available : 
@@ -350,10 +397,7 @@ class TrialGroup(BaseTrialGroup):
         """
         from scipy.stats import sem
 
-        data = self._timeseries_df
-
-        if data is None: 
-            data = self.timeseries_df(bodypart)            
+        data = self.timeseries_df(bodypart)   
 
         g = sns.FacetGrid(
             data=data,
@@ -371,6 +415,16 @@ class TrialGroup(BaseTrialGroup):
             estimator="mean",
             errorbar = "se",  # SEM
         )
+
+        if show_units:
+            g.map_dataframe(
+                sns.lineplot,
+                x="relative_t", y=value, 
+                units="name",
+                hue="laser_state", style="laser_state" , linewidth=0.5,
+                palette=LASER_STATE_PALETTE, 
+                alpha=0.3, estimator=None, sort=None,
+            )
 
         g.add_legend()
 

@@ -5,7 +5,6 @@ from .Leds import Leds
 from .File import File
 from .Trajectory import Trajectory
 from.BehaviorBox import BehaviorBox
-from src.Base.Outcome import Outcome
 
 import pandas as pd
 from pathlib import Path
@@ -21,7 +20,7 @@ class Trial(BaseTrial):
         "condition", "session", "stim_location", "laser_state", 
         "movement_type", "cue_type",
         "time_pad_off", "time_laser_on", "time_reward", "group",
-        "trial_outcomes"
+        "trial_outcomes",  "camera_shift",
     )
 
     SCALAR_METRICS = (
@@ -34,7 +33,7 @@ class Trial(BaseTrial):
         "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
         # computed after prediction and metadata_building
-        "pred_path", "behaviorBox", "camera_shift",
+        "pred_path", "behaviorBox",
         "trajectories"
     )
 
