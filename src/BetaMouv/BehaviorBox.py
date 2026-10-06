@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 
+from .Trajectory import Trajectory
 
 class BehaviorBox:
 
@@ -14,10 +15,10 @@ class BehaviorBox:
     XP, YP = (315, 348)   # pad position (px)
 
     def __init__(self, 
-                 coords: dict[str, pd.DataFrame],
+                 coords: dict[str, Trajectory],
                  time_pad_off: float,
                  shift: tuple[float] = (0.0, 0.0),
-                frame_width=512,) : 
+                frame_width=512, name: str="lol") : 
         """
         Return absolute behavior boxes:
         press, grasp, open, reach
@@ -31,12 +32,16 @@ class BehaviorBox:
         self.coords = coords
         self.frame_width = frame_width
         self.time_pad_off = time_pad_off
+        self.name = name
 
         # constants
         self.lever_right = 40 + self.dx
         self.lever_upper = 10 + self.dy
         self.lever_lower = 18 + self.dy
-        self.reach_bottom = self.coords.loc[self.coords["t"] == self.time_pad_off]["y"]
+
+        finger3_traj = self.coords["finger_3"]
+        print(finger3_traj.is_valid(), self.coords["soft_pad"].is_valid())
+        self.reach_bottom = finger3_traj.clean_coords.loc[finger3_traj.clean_coords["t"] == self.time_pad_off]["y"]
 
         self.spatial_boxes = self.build_spatial_boxes()
         self.adjusted_boxes = self.build_adjusted_boxes()
@@ -46,57 +51,58 @@ class BehaviorBox:
     def build_spatial_boxes(self): 
         return {
             "reach": (
-                self.xl + self.lever_right,
+                self.XL + self.lever_right,
                 self.frame_width,
-                self.xp,
+                self.XP,
                 self.reach_bottom,
                 "yellow"
             ),
             "open": (
                 0,
                 self.frame_width,
-                self.xl + self.lever_right,
-                self.yl + self.lever_upper,
+                self.XL + self.lever_right,
+                self.YL + self.lever_upper,
                 "orange"
             ),
             "grasp": (
                 0,
-                self.yl + self.lever_upper,
-                self.xl + self.lever_right,
-                self.yl - self.lever_lower,
+                self.YL + self.lever_upper,
+                self.XL + self.lever_right,
+                self.YL - self.lever_lower,
                 "blue"
             ),
         }
 
     def bodypart_angle(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
-                               coords: dict[str, pd.DataFrame] | None = None) -> np.ndarray:
+                               coords: dict[str, Trajectory] | None = None) -> np.ndarray:
         """Compute the orientation angle (in degrees) of the segment
         going from bp1 -> bp2, relative to the horizontal axis.
         """
         if coords is None:
             coords = self.coords
 
-        bodypart1 = coords[bp1]
-        bodypart2 = coords[bp2]
+        bodypart1 = coords[bp1].clean_coords
+        bodypart2 = coords[bp2].clean_coords
 
         dx = bodypart2["x"].to_numpy() - bodypart1["x"].to_numpy()
         dy = bodypart2["y"].to_numpy() - bodypart1["y"].to_numpy()
 
-        angle = np.degrees(np.arctan2(dy, dx))  # range [-180, 180]
+        angle = np.degrees(np.arctan2(dy, -dx))  # range [-180, 180]
 
         # remove artificial jumps of 360° when the angle crosses 180°
-        return np.degrees(np.unwrap(np.radians(angle)))
+        return angle
+        # return np.degrees(np.unwrap(np.radians(angle)))
     
     def bodypart_distance(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
-                               coords: pd.DataFrame | None = None) -> np.ndarray: 
+                               coords: dict[str, Trajectory] | None = None) -> np.ndarray: 
         """Compute the orientation angle (in degrees) of the segment
         going from bp1 -> bp2, relative to the horizontal axis.
         """
         if coords is None:
             coords = self.coords
 
-        bodypart1 = coords[bp1]
-        bodypart2 = coords[bp2]
+        bodypart1 = coords[bp1].clean_coords
+        bodypart2 = coords[bp2].clean_coords
 
         dx = bodypart2["x"].to_numpy() - bodypart1["x"].to_numpy()
         dy = bodypart2["y"].to_numpy() - bodypart1["y"].to_numpy()
@@ -105,29 +111,49 @@ class BehaviorBox:
 
 
     def build_adjusted_boxes(self):
-        bp_angle = self.bodypart_angle()
-        bp_distance = self.bodypart_distance()
+        bp_angle: np.array = self.bodypart_angle()
+        bp_distance: np.array = self.bodypart_distance()
+        finger3_traj: Trajectory = self.coords["finger_3"]
+        softpad_traj: Trajectory = self.coords["soft_pad"]
+        t = self.coords["finger_3"].clean_coords["t"]
+
+        fig, ax = plt.subplots(2, 1, figsize=[8, 11])
+        ax[0] = finger3_traj.plot_traj(finger3_traj.clean_coords, ax[0], fig, "red")
+        ax[0] = softpad_traj.plot_traj(softpad_traj.clean_coords, ax[0], fig, "orange")
+        # self.coords["finger_3"].show_traj(self.coords["finger_3"].clean_coords)
+        ax[0].set_title("finger3 (red) - soft pad (orange)")
+        ax[0].set_ylabel("y (cm)")
+        ax[0].set_xlabel("x (cm)")
+
+        sc = ax[1].scatter(bp_angle, bp_distance, c=t, cmap="viridis")
+        cbar = fig.colorbar(sc, ax=ax[1])
+        cbar.set_label("time")
+
+        ax[1].set_ylabel("distance")
+        ax[1].set_xlabel("angle")
+        plt.savefig(f"./data/BetaMouv/results/CONTRA_CHR_#517_#531/behavior_box_testing/{self.name}.png")
+        plt.close()
          
         return {
             "reach": (  # does not change
-                self.xl + self.lever_right,
+                self.XL + self.lever_right,
                 self.frame_width,
-                self.xp,
+                self.XP,
                 self.reach_bottom,
                 "yellow"
             ),
             "open": (
                 0,
                 self.frame_width,
-                self.xl + self.lever_right,
-                self.yl + self.lever_upper,
+                self.XL + self.lever_right,
+                self.YL + self.lever_upper,
                 "orange"
             ),
             "grasp": (
                 0,
-                self.yl + self.lever_upper,
-                self.xl + self.lever_right,
-                self.yl - self.lever_lower,
+                self.YL + self.lever_upper,
+                self.XL + self.lever_right,
+                self.YL - self.lever_lower,
                 "blue"
             ),
         }
@@ -136,13 +162,13 @@ class BehaviorBox:
 
     def _contains(self, name: str, x: float, y: float) -> bool: 
         """Return if the coordinates are in the boxe"""
-        xmin, ymin, xmax, ymax, _ = self.boxes[name]
+        xmin, ymin, xmax, ymax, _ = self.spatial_boxes[name]
         return xmin <= x <= xmax and ymin <= y <= ymax
         
 
     def classify_behavior(self, x: float, y: float) -> str:
         behavior = "none"
-        for name in self.boxes:
+        for name in self.spatial_boxes:
             if self._contains(name, x, y):
                 behavior = name
 
@@ -161,7 +187,7 @@ class BehaviorBox:
         return coords
     
     def draw_boxes(self, ax) :
-        for box_name, coords in self.boxes.items() :
+        for box_name, coords in self.spatial_boxes.items() :
             xmin, ymin, xmax, ymax, color = coords 
 
             rect = Rectangle(

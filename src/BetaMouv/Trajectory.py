@@ -3,7 +3,6 @@
 
 from src.Base.Trajectory import Trajectory as BaseTrajectory
 from .File import File
-from .BehaviorBox import BehaviorBox
 
 import pandas as pd
 import numpy as np
@@ -305,7 +304,7 @@ class Trajectory(BaseTrajectory):
 
 
 
-        fig = plt.figure(figsize=(12,6))
+        fig = plt.figure(figsize=(20,10))
         gs = fig.add_gridspec(3, 2)
 
         offset = 0.2  # cm
@@ -356,3 +355,49 @@ class Trajectory(BaseTrajectory):
         plt.close()
 
 
+    def plot_tendency(self, value , save_as, group, time_pad_off, 
+                      laser_state: str= "LaserOff", show_angle: bool=False):
+        """
+        Plot velocity tendency with error span around the average.
+        Custome error functions available : 
+            - "sem" : Standard Error of the Mean (https://statisticsbyjim.com/hypothesis-testing/standard-error-mean/)
+            How to interprete SEM : 'For a SEM of 3, we know that the typical 
+            difference between a sample mean and the population mean is 3'
+        """
+        from scipy.stats import sem
+        
+        data = self.clean_coords.copy()
+
+        if self.crop_laser_period: 
+            data = self.crop_xy(data, time_pad_off - 0.1, time_pad_off + 0.4)
+
+        data["relative_t"] = (data["t"] - time_pad_off).round(3)
+
+        fig, ax = plt.subplots(figsize=[8, 8])
+        
+        ax.plot(data["relative_t"], data[value], color="k", marker=".")
+        
+        ax.axvline(x=0, color="k", label="time pad off", linestyle="--", lw=1)
+        ax.axhline(y=0, color="k", linestyle="--", lw=1)
+        if show_angle: 
+            ax.axhline(y=90, color="red", linestyle="--", lw=1)
+            ax.axhline(y=-90, color="red", linestyle="--", lw=1)
+            ax.axhline(y=0, color="red", linestyle="--", lw=1)
+
+        if laser_state == "LaserOn":
+            ax.axvspan(xmin=0.025, xmax=0.3, label="laser period", color="tomato", alpha=0.3)
+        else: 
+            ax.axvspan(xmin=0.025, xmax=0.3, label="laser period", color="gray", alpha=0.3)
+
+        ax.set_xlabel("Time (sec)")
+        ax.set_ylabel(value)
+        ax.legend(loc="upper right")
+
+        title = group[:len(group)//2] + "\n" + group[len(group)//2:]
+        ax.figure.suptitle(f"{title}\n {value} - {self.bodypart} - {laser_state}", ha='center')
+        ax.figure.subplots_adjust(top=0.8)
+
+        fig.savefig(save_as)
+        
+        # plt.show()
+        plt.close()
