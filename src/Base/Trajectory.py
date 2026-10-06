@@ -55,7 +55,15 @@ class Trajectory:
         # setup coordinates into cartesian plane (bottom-left origin) + cm units
         self.coords = self._array_to_scaled_cartesian(self.raw_coords)
 
+        self.crop_laser_period = False
+        self.time_pad_off = None
         
+        
+    def crop_coords(self, bool_val: bool, time_pad_off: float = None): 
+        self.crop_laser_period = bool_val
+        self.time_pad_off = time_pad_off
+        print("Coordinates cropped from pad_off to end of laser stimulation !")
+
 
     ############## Success function #############
 
@@ -149,23 +157,37 @@ class Trajectory:
         return clean_df
 
 
-    def show_traj(self, coords: pd.DataFrame):
+    def plot_traj(self, coords: pd.DataFrame, ax: plt.axes, fig, 
+                  color: str = "k", show_time: bool= False) -> plt.axes: 
+        
+        ax.plot(coords["x"], coords["y"], color=color)
+        sc = ax.scatter(coords["x"], coords["y"], 
+                        c=coords["t"] if show_time else color, 
+                        cmap="viridis" if show_time else None)
+
+        if self.crop_laser_period: 
+            laser_coords = self.crop_xy(coords, self.time_pad_off+0.025, self.time_pad_off+0.325)
+            ax.scatter(laser_coords["x"], laser_coords["y"], 
+                        c="red")
+        
+        if show_time: 
+            cbar = fig.colorbar(sc, ax=ax)
+            cbar.set_label("t")
+
+        return ax
+
+
+    def show_traj(self, coords: pd.DataFrame, show: bool=False):
         if coords is None:
-            coords = self.coords
+            coords = self.coords.copy()
+
+        if self.crop_laser_period: 
+            coords=self.crop_xy(coords, self.time_pad_off - 0.1, self.time_pad_off + 0.4)
 
         fig, ax = plt.subplots(figsize=(8, 6))
 
-        ax.plot(coords["x"], coords["y"], color="lightblue")
-        ax.scatter(coords["x"], coords["y"], marker="|", )
+        ax = self.plot_traj(coords, ax, fig)
 
-        # sns.scatterplot(
-        #     data=coords,
-        #     x="x", y="y", 
-        #     ax=ax,
-        #     markers="|",
-        #     linewidth=0,
-        #     hue="instant_velocity"
-        # )
         name = self.file.name.replace("pred_results_", "")
         title = name[:len(name)//2] + "\n" + name[len(name)//2:]
 
@@ -177,8 +199,11 @@ class Trajectory:
             ylabel="Y position (cm)",
         )
 
-        plt.show()
+        if show: 
+            plt.show()
         plt.close()
+
+        return fig
 
 
 
@@ -199,10 +224,14 @@ class Trajectory:
         if coords is None:
             coords = self.coords
 
+        coords = coords.copy()
         coords["instant_velocity"] = self.instant_velocity(coords)
-        coords["instant_acc"] = self.acceleration(coords)
+        coords["instant_speed"] = self.instant_speed(coords)
+        coords["angle"] = self.angle(coords)
         coords["lever_distance"] = self.lever_bodypart_distance(coords)
         coords["distances"] = self.distances(coords)
+        coords["acc"] = self.acceleration(coords)
+        coords["signed_acc"] = self.signed_acceleration(coords)
 
         return coords
 
@@ -214,7 +243,7 @@ class Trajectory:
 
         v = coords[["x", "y"]].diff()
 
-        return np.sqrt(v["x"]**2 + v["y"]**2)
+        return np.hypot(v["x"], v["y"])
 
 
     def velocity_vector(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
@@ -230,34 +259,70 @@ class Trajectory:
             "vy": v["y"]
         })
 
-    def instant_velocity(self, coords: pd.DataFrame | None = None) -> np.array  :
-        """Instantaneous velocity"""
-        if coords is None:
-            coords = self.coords
-
+    def instant_speed(self, coords=None):
+        """Scalar, >= 0, no direction."""
         v = self.velocity_vector(coords)
 
-        return np.sqrt(v["vx"]**2 + v["vy"]**2)
+        return np.hypot(v["vx"], v["vy"])
+
+
+    def instant_velocity(self, coords=None, direction=(-1, 1)) -> pd.Series:
+        """Velocity projected on `direction`.
+        > 0 : moving toward `direction` (default: upper-left)
+        < 0 : moving away from it
+        """
+
+        u = np.asarray(direction, float)
+        u /= np.linalg.norm(u)
+        v = self.velocity_vector(coords)
+
+        cond = (v["vx"] < 0) & (v["vy"] > 0)          # upper-left, as in your docstring
+        sign = np.where(cond, 1, -1)
+        return sign * np.hypot(v["vx"], v["vy"])
+        
+        # return v["vx"] * u[0] + v["vy"] * u[1]
+
+
+    def radial_velocity(self, coords=None): 
+        
+        xl, yl = self._point_to_scaled_cartesian(self.XL, self.YL)
+
+        disp = (xl, yl) - coords[["x", "y"]]
+        u = disp.div(np.linalg.norm(disp, axis=1), axis=0)      # unit vector lever -> point
+        v = self.velocity_vector(coords)
+
+        return v["vx"] * u["x"] + v["vy"] * u["y"]        
+
 
 
     def acceleration(self, coords: pd.DataFrame | None = None) -> np.array :
-        """ Instantaneous acceleration magnitude """
-        if coords is None:
-            coords = self.coords
-
         v = self.velocity_vector(coords)[["vx", "vy"]]
         a = v.diff() / self.dt
-        
         return (np.sqrt(a["vx"]**2 + a["vy"]**2))
 
 
-    def lever_bodypart_distance(self, 
-                                coords: pd.DataFrame | None = None) -> np.array : 
+    def signed_acceleration(self, coords=None, direction=(-1, 1)):
+        return self.instant_velocity(coords, direction).diff() / self.dt
+
+
+    def lever_bodypart_distance(self, coords: pd.DataFrame | None = None) -> np.array : 
         """Compute the straight/net distance between the lever and the bodypart choosen"""
         if coords is None:
             coords = self.coords
 
         xy = coords[["x", "y"]]
-        disp = xy - (self.XL, self.YL)
+        xl, yl = self._point_to_scaled_cartesian(self.XL, self.YL)
+        disp = xy - (xl, yl)
 
         return np.linalg.norm(disp, axis=1)
+
+
+    def angle(self, coords=None, direction=(-1, 1)):
+        """Compute angle over time"""
+        if coords is None: 
+            coords = self.coords
+
+        dx = coords["x"].diff()
+        dy = coords["y"].diff()
+
+        return np.degrees(np.arctan2(dy, -dx))
