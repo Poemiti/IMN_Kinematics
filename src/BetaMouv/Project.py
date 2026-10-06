@@ -50,7 +50,7 @@ class Project(BaseProject):
         joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
         try:
             self.trialgroup = (TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None)
-            print("\n-->", len(joblib_filenames), "FILES LOADED")
+            print("\n-->", len(self.trialgroup.keep_val), "FILES LOADED")
 
         except EOFError as e:
             print(f"\nWARNING: Could not load joblib files: {e}")
@@ -270,7 +270,7 @@ class Project(BaseProject):
         #  backup, then write 
 
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup = self.paths.trials_metadata.parent / f"{self.paths.trials_metadata.name}_backup_{stamp}"
+        backup = self.paths.data_root / "trials_metadata_backup" / f"metabuilding_{stamp}"
         shutil.copytree(self.paths.trials_metadata, backup)
         print(f"Backup: {backup}")
 
@@ -332,10 +332,9 @@ class Project(BaseProject):
         ==============================================\n""")
         preprocess_dir = u.make_dir(self.paths.analysis(self.trialgroup.keep_val) / "preprocess")
         preprocess_data_path = preprocess_dir / "preprocess_data.csv"
-        outlier_fig_path = preprocess_dir / "outlier_distri.png"
 
         interpolation_dir = preprocess_dir / "interpolation"
-        shutil.rmtree(interpolation_dir, ignore_errors=True)   # clear figures first
+        # shutil.rmtree(interpolation_dir, ignore_errors=True)   # clear figures first
         u.make_dir(interpolation_dir)                          # then (re)create
 
         MAX_OUTLIER = self.project_info["max_outlier"]
@@ -355,7 +354,7 @@ class Project(BaseProject):
                 traj = Trajectory(
                     coords_path=trial.pred_path,
                     view=trial.camera_view,
-                    bodypart="finger_3",
+                    bodypart=bodypart,
                     cm_per_pixel=trial.cm_per_pixel,
                     shift=trial.camera_shift,
                 )
@@ -411,19 +410,10 @@ class Project(BaseProject):
         outlier_df = pd.DataFrame(preprocess_records)
         outlier_df.to_csv(preprocess_data_path)
 
-        #  backup, then write 
-
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup = self.paths.trials_metadata.parent / f"{self.paths.trials_metadata.name}_backup_{stamp}"
-        shutil.copytree(self.paths.trials_metadata, backup)
-        print(f"Backup: {backup}")
-
-        # save joblib
-
+        #  backup, save joblib
+        self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
+                                    step="preprocessing")
         self.trialgroup.save(self.paths.trials_metadata)
-        # self.trialgroup.distri_outlier(data=outlier_df, save_as=outlier_fig_path)
-        # self.trialgroup.lineplot_all_traj(save_as=preprocess_dir / f"{bodypart}_traj.png")
-
 
     @process_time
     def run_validation(self):
@@ -435,26 +425,78 @@ class Project(BaseProject):
 
         BODYPARTS = self.project_info["bodyparts"]
         
-        preprocess_dir = u.make_dir(self.paths.analysis(self.trialgroup.keep_val) / "preprocess" / "interpolation")
-        print("\n-->", len(list(preprocess_dir.iterdir())), "FILES TO VALIDATE")
-        trial_states = Validator.load_preprocess_validator(preprocess_dir)
+        preprocess_dir = self.paths.analysis(self.trialgroup.keep_val) / "preprocess"
+        interpolation_dir = preprocess_dir / "interpolation"
 
+        # Find existing validation states
+        validation_files = sorted(preprocess_dir.glob("validation_state_*.csv"))
+
+        if validation_files:
+            print("Validation has already been computed. Select option:")
+            print("q\t: Quit")
+            print("c\t: Compute again")
+            for i, filename in enumerate(validation_files):
+                print(f"{i}\t: load {filename.name}")
+
+            res = input("Option selected: ").strip()
+
+            if res == "q":
+                print("\nQuit !\n")
+                sys.exit()
+
+            elif res == "c": 
+                print("Re-computing validation")
+                print("\n-->", len(list(interpolation_dir.iterdir())), "FILES TO VALIDATE")
+                trial_states: dict = Validator.load_preprocess_validator(interpolation_dir)
+
+                # save validation state
+                stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                pd.Series(trial_states).to_csv(preprocess_dir / f"validation_state_{stamp}.csv")
+
+            elif res.isdigit():
+                index = int(res) 
+
+                if index >= len(validation_files):
+                    raise ValueError(f"Invalid file index: {index}. Choose between 0 and {len(validation_files) - 1}.")
+
+                selected_file = validation_files[index]
+                print(f"\nLoading validation state: {selected_file.name}")
+                trial_states = pd.read_csv(selected_file, index_col=0).iloc[:, 0].to_dict() 
+
+            else: 
+                raise ValueError(f"'{res}' is not valid. Choose a file number, 'c', or 'q'")
+
+        else :
+            print("No validation file found")
+            print("\n-->", len(list(interpolation_dir.iterdir())), "FILES TO VALIDATE")
+            trial_states: dict = Validator.load_preprocess_validator(interpolation_dir)
+            
+            # save validation state
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            pd.Series(trial_states).to_csv(preprocess_dir / f"validation_state_{stamp}.csv")
+
+        # save validation state
+        n_state = 0
         for trial in tqdm(self.trialgroup.trials, desc="Saving validation"):
             if not trial.is_valid(): 
                 continue
 
+            success = []
             for bodypart in BODYPARTS: 
-
+                
                 state = trial_states.get(f"{bodypart}_{trial.name}")
 
                 if not state:
                     continue
 
+                n_state += 1
+                success.append(state)
                 traj: Trajectory = trial.trajectories.get(bodypart)
 
-                if state == "rejected":
+                if state == "rejected" or "rejected" in success:
                     traj.set_success(stage="validation", success=False, reason="man reject")
- 
+                    continue
+
                 elif state == "raw":
                     traj.set_success(stage="validation", success=True, reason="man acc, raw")
                     traj.clean_coords = traj.coords
@@ -462,6 +504,9 @@ class Project(BaseProject):
                     traj.set_success(stage="validation", success=True, reason="man acc, inter")
                     traj.clean_coords = traj.interpolated_coords
 
+        #  backup, then save
+        self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
+                                    step="validation")
         self.trialgroup.save(self.paths.trials_metadata)
 
 
@@ -475,17 +520,20 @@ class Project(BaseProject):
         ==============================================\n""")
 
         BODYPARTS = self.project_info["bodyparts"]        
-        preprocess_dir = self.paths.results_root / "preprocess"
 
         for trial in tqdm(self.trialgroup.trials, desc="Computing metrics"):
             if not trial.is_valid():    
                 continue
 
-            Boxes = BehaviorBox(coords=trial.trajectories,
-                                time_pad_off=trial.time_pad_off,
-                                shift=trial.camera_shift,)
+            # if all(traj.is_valid() for traj in trial.trajectories.values()): 
 
-            trial.update(behaviorBox=Boxes)
+            #     Boxes = BehaviorBox(coords=trial.trajectories,
+            #                         time_pad_off=trial.time_pad_off,
+            #                         shift=trial.camera_shift,
+            #                         name=trial.name)
+            
+
+            # trial.update(behaviorBox=Boxes)
 
             for bodypart in BODYPARTS: 
 
@@ -493,15 +541,14 @@ class Project(BaseProject):
                 
                 if not traj.is_valid(): 
                     continue
-
-                coords = traj.compute_instant_metrics(trial.coords)
-                coords["behavior_label"] = Boxes.classify_trajectory(coords)
-                ## TODO
+                
+                traj.clean_coords = traj.compute_instant_metrics(traj.clean_coords)
+                # TODO
                 # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
 
-                trial.trajectories[bodypart] = coords            
-
-            self.trialgroup.save(self.paths.trials_metadata)
+        self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
+                                            step="metrics")
+        self.trialgroup.save(self.paths.trials_metadata)
 
 
     @process_time 
@@ -517,16 +564,53 @@ class Project(BaseProject):
         bodypart = "finger_3"
 
         self.trialgroup.crop_coords(True)
-        self.trialgroup.buils_timeseries_df(init=True, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
+        self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
-        self.trialgroup.lineplot_all_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
-        self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
+        # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
+        # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")
+        # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
-        for val in ["instant_velocity", "instant_acc", "lever_distance"]:
+        timeseries_metric = [
+                            "x", 
+                            "y", 
+                            "instant_velocity", 
+                            "instant_speed", 
+                            "acc", 
+                            "signed_acc", 
+                            "lever_distance",
+                            "angle"
+                            ] 
+        for val in timeseries_metric:
             self.trialgroup.plot_tendency(
                 value=val,
-                save_as=u.make_path(analysis_dir / "tendency", f"{val}.svg")
+                save_as=u.make_path(analysis_dir / "tendency" / bodypart, f"{val}.svg"),
+                # show_units=True,
             )
-        
+
+        i = 0
+        for trial in tqdm(self.trialgroup.trials, desc="plotting timeseries"): 
+            i+=1
+            if not trial.is_valid() or i%100 != 0: 
+                continue
+            
+            traj: Trajectory = trial.trajectories.get(bodypart)
+
+            if not traj.is_valid(): 
+                continue
+
+            traj.crop_coords(True, time_pad_off=trial.time_pad_off)
+
+            fig = traj.show_traj(traj.clean_coords)
+            fig.savefig(u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"trajectory.svg"))
+
+            for val in timeseries_metric: 
+
+                traj.plot_tendency(value=val, time_pad_off=trial.time_pad_off,
+                                   laser_state=trial.laser_state,
+                                   group=trial.group,
+                                   show_angle= val == "angle",
+                                   save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
+
+
         # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
     
