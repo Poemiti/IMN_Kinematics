@@ -25,6 +25,11 @@ import src.BetaMouv.gui.database_filter as Data_filter
 import src.BetaMouv.gui.preprocess_validator as Validator
 
 
+# nohup python3 -u main.py > main.out &
+# tail -f main.out 
+
+
+
 class Project(BaseProject):
 
     def __init__(self, name: str):
@@ -73,26 +78,42 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        dataset = Data_filter.load_database(self.paths.raw_videos, self.paths.database, "video")
+        dataset = list(Data_filter.load_database(
+                self.paths.raw_videos, self.paths.database, "video")["filename"])
 
-        for i, video_path in enumerate(dataset["filename"].iloc[:]): 
+        for i, video_path in enumerate(dataset): 
+
+            if "FIBER_BROKEN" in video_path : 
+                print("\nFIBER BROKEN, skip")
+                continue
 
             raw_video = Video(video_path=video_path)
 
-            output_dir = u.make_dir(self.paths.raw / raw_video.file.subject / raw_video.name)
+
+            if raw_video.file.condition == "Unknown" or \
+            raw_video.file.stim_location == "Unknown" or \
+            raw_video.file.laser_intensity == "Unknown": 
+                video_name = raw_video.path.parent.stem
+            else: 
+                video_name = raw_video.name
+
+            output_dir = u.make_dir(self.paths.raw / f"subject_{raw_video.file.subject}"/ video_name)
 
             meta = {"month": raw_video.date.month}
             clip_duration = u.match_rule(meta, self.clip_duration_rules)
 
-            print(f"\nSplitting video : {raw_video.name}")
+            print(f"\nSplitting video : {video_name}")
             print(f"clip duration: {clip_duration}")
 
-            if not output_dir.exists() : 
-                self.split_video(input_path= raw_video.path, 
+
+            if (list(output_dir.glob("*.mp4"))) == [] : 
+                raw_video.split_video(input_path= raw_video.path, 
                                 output_dir= output_dir, 
-                                CLIP_DURATION= clip_duration)
+                                CLIP_DURATION= clip_duration, 
+                                CRF=13)
             else : 
                 print(f"Has already been splitted !")
+
 
     def build_metadata(self):
         print(f"""

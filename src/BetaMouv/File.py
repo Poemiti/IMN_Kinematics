@@ -15,7 +15,7 @@ class File(BaseFile):
 
         self.date = datetime.strptime(trial_metadata["date"], "%Y%m%d").date()
         self.camera_view = "left" if trial_metadata["camera_view"] == "H001" else "right"
-        self.clip_number = int(trial_metadata["clip"])
+        self.clip_number = int(trial_metadata["clip"]) if trial_metadata["clip"] != "Unknown" else None
         self.subject = trial_metadata["subject"]
         self.condition = trial_metadata["condition"]
         self.laser_type = trial_metadata["laser_type"]
@@ -23,15 +23,19 @@ class File(BaseFile):
         self.handedness = trial_metadata["handedness"]
         self.session = trial_metadata["session"]
 
-        self.laser_intensity = self._set_laser_intensity(trial_metadata["laser_intensity"])
+        self.laser_intensity = self._set_laser_intensity(trial_metadata["laser_intensity"], trial_metadata["laser_type"])
 
         self.frame_width_px = 512
         self.frame_width_cm = 8.7 if self.camera_view == "left" else 8.3
         self.cm_per_pixel = self.frame_width_cm / self.frame_width_px
 
 
-    def _set_laser_intensity(self, intensity) -> str: 
-        if (self.laser_type == "Beta" and intensity == "1mW" )or \
+    def _set_laser_intensity(self, intensity, laser_type) -> str: 
+        if laser_type == "NOstim": 
+            return "NOstim"
+        elif intensity == "Unknown": 
+            return "Unknown"
+        elif (self.laser_type == "Beta" and intensity == "1mW" )or \
             (self.laser_type == "Conti" and intensity == "0,5mW"): 
             return "low"
         elif (self.laser_type == "Beta" and intensity == "2,5mW") or \
@@ -41,8 +45,11 @@ class File(BaseFile):
             return "incompatible"
 
 
-    def parse_filename(self) -> dict:
+    def parse_filename(self, name: str = None) -> dict:
         import re
+
+        if name is None: 
+            name = self.name
         
         PATTERNS = {
                 "subject": r"#\d{3}",
@@ -68,7 +75,7 @@ class File(BaseFile):
         for key, regex in PATTERNS.items():
 
             if result[key] == "Unknown"  :
-                match = re.search(regex, self.name)
+                match = re.search(regex, name)
                 if match:
                     if key == "clip" : 
                         result[key] = match.group(1)
@@ -77,19 +84,19 @@ class File(BaseFile):
 
         # Task handling (not regex)
         for t in TASKS:
-            if t in self.name.split("_"):
+            if t in name.split("_"):
                 result["task"] = t
                 break
 
-        # Second pass: derived defaults 
-        if result["laser_intensity"] == "Unknown" :
+        # # Second pass: derived defaults 
+        # if result["laser_intensity"] == "Unknown" :
 
-            if result["laser_type"] == "Beta":
-                result["laser_intensity"] = "1mW"
-            elif result["laser_type"] == "Conti":
-                result["laser_intensity"] = "0,5mW"
-            elif result["laser_type"] == "NOstim":
-                result["laser_intensity"] = "NOstim"
+        #     if result["laser_type"] == "Beta":
+        #         result["laser_intensity"] = "1mW"
+        #     elif result["laser_type"] == "Conti":
+        #         result["laser_intensity"] = "0,5mW"
+        #     elif result["laser_type"] == "NOstim":
+        #         result["laser_intensity"] = "NOstim"
 
         return result
 
@@ -117,8 +124,10 @@ class File(BaseFile):
         
         metadata = self.parse_filename()
 
-        if metadata["condition"] == "Unknown" : 
-            metadata = self.parse_filename(self.path.parent.name)
+        if metadata["condition"] == "Unknown" or \
+            metadata["laser_intensity"] == "Unknown" or \
+            metadata["stim_location"] == "Unknown" : 
+                metadata = self.parse_filename(self.path.parent.name)
 
         metadata.pop("clip", None)
         metadata.pop("date", None)
