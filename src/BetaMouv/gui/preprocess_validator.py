@@ -132,7 +132,7 @@ class View(tk.Tk):
 
 class Model:
     def __init__(self, trajfig_dir: Path):
-        self.paths = list(trajfig_dir.glob("interpolation_*.png"))
+        self.paths = sorted(list(trajfig_dir.glob("interpolation_*.png")))
         self.validation = {}
 
     def get_path(self, i) -> Path:
