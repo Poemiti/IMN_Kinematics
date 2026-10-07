@@ -1,1 +1,139 @@
-rules: []
+rules:
+- value:
+    dx: -0.876
+    dy: -1.469
+  when:
+    date: '2024-06-26'
+    subject: '#531'
+- value:
+    dx: -0.945
+    dy: -1.677
+  when:
+    date: '2024-06-21'
+    subject: '#531'
+- value:
+    dx: -18.716
+    dy: 22.279
+  when:
+    date: '2024-05-26'
+    subject: '#531'
+- value:
+    dx: 0.852
+    dy: -1.175
+  when:
+    date: '2024-07-02'
+    subject: '#531'
+- value:
+    dx: 0.115
+    dy: -0.207
+  when:
+    date: '2024-07-05'
+    subject: '#531'
+- value:
+    dx: -1.126
+    dy: -2.14
+  when:
+    date: '2024-06-25'
+    subject: '#531'
+- value:
+    dx: -0.702
+    dy: -0.394
+  when:
+    date: '2024-07-12'
+    subject: '#531'
+- value:
+    dx: -0.407
+    dy: 0.564
+  when:
+    date: '2024-06-28'
+    subject: '#517'
+- value:
+    dx: -18.293
+    dy: 22.522
+  when:
+    date: '2024-05-26'
+    subject: '#517'
+- value:
+    dx: -21.227
+    dy: 84.98
+  when:
+    date: '2024-05-27'
+    subject: '#517'
+- value:
+    dx: 0.277
+    dy: -0.136
+  when:
+    date: '2024-07-11'
+    subject: '#517'
+- value:
+    dx: -1.319
+    dy: -1.65
+  when:
+    date: '2024-06-24'
+    subject: '#517'
+- value:
+    dx: -76.477
+    dy: 115.426
+  when:
+    date: '2024-07-21'
+    subject: '#517'
+- value:
+    dx: -0.02
+    dy: -0.018
+  when:
+    date: '2024-07-05'
+    subject: '#517'
+- value:
+    dx: -0.342
+    dy: 0.386
+  when:
+    date: '2024-05-30'
+    subject: '#517'
+- value:
+    dx: -0.731
+    dy: -1.729
+  when:
+    date: '2024-06-21'
+    subject: '#517'
+- value:
+    dx: -0.293
+    dy: 1.647
+  when:
+    date: '2024-05-23'
+    subject: '#517'
+- value:
+    dx: -0.852
+    dy: -1.416
+  when:
+    date: '2024-06-26'
+    subject: '#517'
+- value:
+    dx: -0.303
+    dy: 0.068
+  when:
+    date: '2024-07-03'
+    subject: '#517'
+- value:
+    dx: -0.493
+    dy: -1.43
+  when:
+    date: '2024-06-20'
+    subject: '#517'
+- value:
+    dx: -0.208
+    dy: 1.381
+  when:
+    date: '2024-05-24'
+    subject: '#517'
+- value:
+    dx: -0.272
+    dy: -0.842
+  when:
+    date: '2024-07-20'
+    subject: '#517'
+- value:
+    dx: -0.343
+    dy: 0.451
+  when:
+    date: '2024-07-01'
+    subject: '#517'

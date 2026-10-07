@@ -178,16 +178,25 @@ class TrajectoryDLC(Trajectory):
                 bodypart: str = "finger_3",
                 cm_per_pixel: float | None = None,
                 time_pad_off: float = None,
-                shift: tuple[float] | None = (0,0)): 
+                shift: tuple[float] | None = (0,0), 
+                fps: float = 125, 
+                frame_height_px: int = 512, 
+                frame_width_px: int = 512): 
 
         self.file = self.file_cls(coords_path)
-
         self.time_pad_off = time_pad_off
         self.coords_path = coords_path
         self.view = view
         self.bodypart = bodypart
         self.cm_per_pixel = cm_per_pixel
         self.shift = shift
+
+        # constants
+        self.fps = fps
+        self.frame_height_px = frame_height_px
+        self.frame_width_px = frame_width_px
+
+        # traj validity
         self.stage_outcomes = {name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)}
 
         # raw pixel coordinates, untouched — kept for debugging / overlaying on the source video
@@ -249,10 +258,11 @@ class TrajectoryDLC(Trajectory):
 
 
     def _to_cartesian(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
-        """Flip pixel axes (top-left origin) to a bottom-left-origin cartesian plane."""
-        y = self.frame_height - y
+        """Flip pixel axes (top-left origin) to a bottom-left-origin cartesian plane
+        Coordinates must be in pixels"""
+        y = self.frame_height_px - y
         if self.view != "left":   # non-left views are also mirrored horizontally
-            x = self.frame_width - x
+            x = self.frame_width_px - x
         return x, y
 
 

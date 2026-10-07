@@ -51,13 +51,17 @@ class Project(BaseProject):
 
         # trial group of the project
         joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
-        try:
-            self.trialgroup = (TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None)
-            print("\n-->", len(self.trialgroup.keep_val), "FILES LOADED")
-
-        except EOFError as e:
-            print(f"\nWARNING: Could not load joblib files: {e}")
+        if joblib_filenames == []: 
+            print("No Joblib metadata found")
             self.trialgroup = None
+        else: 
+            try:
+                self.trialgroup = (TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None)
+                print("\n-->", len(self.trialgroup.keep_val), "FILES LOADED")
+
+            except EOFError as e:
+                print(f"\nWARNING: Could not load joblib files: {e}")
+                self.trialgroup = None
 
             
 
@@ -546,10 +550,9 @@ class Project(BaseProject):
 
             if all(traj.is_valid() for traj in trial.trajectories.values()): 
 
-                behavior = Behavior(coords=trial.trajectories,
-                                    time_pad_off=trial.time_pad_off,
-                                    shift=trial.camera_shift,
-                                    name=trial.name)
+                behavior = Behavior(coords_set=trial.trajectories,
+                                    time_pad_off=trial.time_pad_off, 
+                                    cm_per_pixel=trial.cm_per_pixel)
                 trial.update(behavior=behavior)
 
             # compute metrics for each trajectories
@@ -582,53 +585,65 @@ class Project(BaseProject):
 
         bodypart = "finger_3"
 
-        self.trialgroup.crop_coords(True)
-        self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
+        for trial in tqdm(self.trialgroup.trials, desc="Behavior"): 
+
+            if not trial.is_valid() : 
+                continue
+
+            if trial.behavior is None: 
+                print("\nNO BEHAVIOR: ", trial.name)
+
+            else: 
+                print()
+                print(trial.behavior.features)
+                break
+        # self.trialgroup.crop_coords(True)
+        # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
         # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
         # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")
         # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
-        timeseries_metric = [
-                            "x", 
-                            "y", 
-                            "instant_velocity", 
-                            "instant_speed", 
-                            "acc", 
-                            "signed_acc", 
-                            "lever_distance",
-                            "angle"
-                            ] 
-        for val in timeseries_metric:
-            self.trialgroup.plot_tendency(
-                value=val,
-                save_as=u.make_path(analysis_dir / "tendency" / bodypart, f"{val}.svg"),
-                # show_units=True,
-            )
+        # timeseries_metric = [
+        #                     "x", 
+        #                     "y", 
+        #                     "instant_velocity", 
+        #                     "instant_speed", 
+        #                     "acc", 
+        #                     "signed_acc", 
+        #                     "lever_distance",
+        #                     "angle"
+        #                     ] 
+        # for val in timeseries_metric:
+        #     self.trialgroup.plot_tendency(
+        #         value=val,
+        #         save_as=u.make_path(analysis_dir / "tendency" / bodypart, f"{val}.svg"),
+        #         # show_units=True,
+        #     )
 
-        i = 0
-        for trial in tqdm(self.trialgroup.trials, desc="plotting timeseries"): 
-            i+=1
-            if not trial.is_valid() or i%100 != 0: 
-                continue
+        # i = 0
+        # for trial in tqdm(self.trialgroup.trials, desc="plotting timeseries"): 
+        #     i+=1
+        #     if not trial.is_valid() or i%100 != 0: 
+        #         continue
             
-            traj: TrajectoryDLC = trial.trajectories.get(bodypart)
+        #     traj: TrajectoryDLC = trial.trajectories.get(bodypart)
 
-            if not traj.is_valid(): 
-                continue
+        #     if not traj.is_valid(): 
+        #         continue
 
-            traj.crop_coords(True, time_pad_off=trial.time_pad_off)
+        #     traj.crop_coords(True, time_pad_off=trial.time_pad_off)
 
-            fig = traj.show_traj(traj.clean_coords)
-            fig.savefig(u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"trajectory.svg"))
+        #     fig = traj.show_traj(traj.clean_coords)
+        #     fig.savefig(u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"trajectory.svg"))
 
-            for val in timeseries_metric: 
+        #     for val in timeseries_metric: 
 
-                traj.plot_tendency(value=val, time_pad_off=trial.time_pad_off,
-                                   laser_state=trial.laser_state,
-                                   group=trial.group,
-                                   show_angle= val == "angle",
-                                   save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
+        #         traj.plot_tendency(value=val, time_pad_off=trial.time_pad_off,
+        #                            laser_state=trial.laser_state,
+        #                            group=trial.group,
+        #                            show_angle= val == "angle",
+        #                            save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
 
 
         # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))

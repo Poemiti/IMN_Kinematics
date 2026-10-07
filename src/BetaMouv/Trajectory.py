@@ -35,7 +35,8 @@ class TrajectoryDLC(BaseTrajectory):
                 cm_per_pixel: float | None = 1,
                 time_pad_off: float = None,
                 shift: tuple[float] | None = (0,0)):
-        super().__init__(coords_path, view, bodypart, cm_per_pixel, time_pad_off, shift)
+        super().__init__(coords_path, view, bodypart, cm_per_pixel, time_pad_off, shift, 
+                         cfg["fps"], cfg["frame_height_px"], cfg["frame_width_px"])
 
         self.interpolated_coords = None
         self.clean_coords = None
@@ -51,7 +52,7 @@ class TrajectoryDLC(BaseTrajectory):
 
     def compute_instant_metrics(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
         if coords is None:
-            coords = self.clean_coords
+            coords = self.coords
 
         coords = coords.copy()
         coords["instant_velocity"] = self.instant_velocity(coords)
@@ -380,8 +381,8 @@ class TrajectoryDLC(BaseTrajectory):
         ax_traj.set(
             xlabel=("x (cm)"),
             ylabel=("y (cm)"),
-            xlim=(0, self.frame_height * self.cm_per_pixel),
-            ylim=(0, self.frame_height * self.cm_per_pixel)
+            xlim=(0, self.FRAME_HEIGHT_CM),
+            ylim=(0, self.FRAME_WIDTH_CM)
             )
         ax_traj.legend()
         fig.suptitle(title, wrap=True)

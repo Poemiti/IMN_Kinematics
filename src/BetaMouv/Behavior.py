@@ -17,7 +17,7 @@ class Behavior:
 
     def __init__(self, 
                  coords_set: dict[str, Trajectory], 
-                 time_pad_off: float, 
+                 time_pad_off: float, cm_per_pixel: float
                  ) : 
         """
         Return behavior label during trial time:
@@ -26,6 +26,7 @@ class Behavior:
 
         self.coords_set = coords_set
         self.time_pad_off = time_pad_off
+        self.cm_per_pixel = cm_per_pixel
 
         finger3_traj: TrajectoryDLC = self.coords_set["finger_3"]
         self.reach_bottom = finger3_traj.clean_coords.loc[finger3_traj.clean_coords["t"] == self.time_pad_off]["y"]
@@ -38,16 +39,16 @@ class Behavior:
 
 
         # features building
-        centroid = Trajectory(self.centroid())
-        features = self.centroid()              # initilisation with centroid
-        features["area"] = self.area_triangle()
-        features["centroid_direction"] = centroid.angle()
-        features["centroid_velocity"] = centroid.instant_velocity()
-        features["centroid_speed"] = centroid.instant_speed()
-        features["centroid_acc"] = centroid.signed_acceleration()
-        features["f3_sp_distance"] = self.bodypart_distance()
-        features["f3_sp_angle"] = self.bodypart_angle()
-        features["centroid_lever_dist"] = centroid.obj_bodypart_distance(obj_coord=self.LEVER_POS)
+        self.centroid = Trajectory(self.centroid())
+        self.features = self.centroid()              # initilisation with centroid
+        self.features["area"] = self.area_triangle()
+        self.features["centroid_direction"] = self.centroid.angle()
+        self.features["centroid_velocity"] = self.centroid.instant_velocity()
+        self.features["centroid_speed"] = self.centroid.instant_speed()
+        self.features["centroid_acc"] = self.centroid.signed_acceleration()
+        self.features["f3_sp_distance"] = self.bodypart_distance()
+        self.features["f3_sp_angle"] = self.bodypart_angle()
+        self.features["centroid_lever_dist"] = self.centroid.obj_bodypart_distance(obj_coord=self.LEVER_POS)
 
 
     def bodypart_angle(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
@@ -109,6 +110,8 @@ class Behavior:
                  coords_set: dict[str, Trajectory] = None) -> np.array:
         """Return area accros time, between 3 bodyparts
         Based on this tuto : https://www.geeksforgeeks.org/python/python-program-to-calculate-the-area-of-a-triangle/"""
+        if coords_set is None:
+            coords_set = self.coords_set
 
         c1 = coords_set[bp1].clean_coords
         c2 = coords_set[bp2].clean_coords
