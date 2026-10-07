@@ -3,7 +3,7 @@
 
 from src.Base.TrialGroup import TrialGroup as BaseTrialGroup
 from .Trial import Trial
-from .Trajectory import Trajectory
+from .Trajectory import TrajectoryDLC
 
 import pandas as pd
 import seaborn as sns
@@ -137,7 +137,7 @@ class TrialGroup(BaseTrialGroup):
                 if not trial.is_valid() or trial.laser_intensity == "incompatible":
                     continue
 
-                traj: Trajectory = trial.trajectories.get(bodypart)
+                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
 
                 if not traj.is_valid(): 
                     continue
