@@ -83,8 +83,8 @@ class Project(BaseProject):
 
         for i, video_path in enumerate(dataset): 
 
-            if "FIBER_BROKEN" in video_path : 
-                print("\nFIBER BROKEN, skip")
+            if "FIBER_BROKEN" in video_path or "NO_TRUST" in video_path: 
+                print("\nskip")
                 continue
 
             raw_video = Video(video_path=video_path)
