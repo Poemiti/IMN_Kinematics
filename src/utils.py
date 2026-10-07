@@ -1,9 +1,16 @@
 # src/utils.py
 
 from pathlib import Path
-import time, os, datetime as dt, csv
+import time, os, datetime as dt, csv, yaml
 from collections import Counter
 from functools import wraps
+
+
+def load_config(filename: Path):
+        with open(filename, "r") as cfg_file:
+            cfg = yaml.safe_load(cfg_file)
+        return cfg
+
 
 def match_rule(meta, rules):
     best_match = None

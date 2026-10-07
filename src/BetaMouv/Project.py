@@ -7,8 +7,8 @@ from .PathConfig import PathConfig
 from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
-from .Trajectory import Trajectory
-from .BehaviorBox import BehaviorBox
+from .Trajectory import TrajectoryDLC
+from .Behavior import Behavior
 
 
 
@@ -17,7 +17,6 @@ import yaml, joblib, sys, shutil, traceback
 from src.utils import process_time
 from tqdm import tqdm
 from datetime import datetime
-
 import pandas as pd
 
 import src.utils as u
@@ -37,16 +36,15 @@ class Project(BaseProject):
 
         self.config_dir: Path = Path(f"./config/{self.name}/")
 
-        self.conditions: dict = self._load_config(self.config_dir / "conditions.yaml")
-        self.subject_info: dict = self._load_config(self.config_dir / "subject_info.yaml")
-        self.project_info: dict = self._load_config(self.config_dir / "project_info.yaml")
+        self.conditions: dict = u.load_config(self.config_dir / "conditions.yaml")
+        self.subject_info: dict = u.load_config(self.config_dir / "subject_info.yaml")
+        self.project_info: dict = u.load_config(self.config_dir / "project_info.yaml")
 
         # setup rules
-        self.annotation_rules: dict = self._load_config(self.config_dir / "rules/annotation_rules.yaml")
-        self.clip_duration_rules: dict = self._load_config(self.config_dir / "rules/clip_duration_rules.yaml")
-        self.ethology_rules: dict = self._load_config(self.config_dir / "rules/ethology_rules.yaml")
-        self.exclusion_rules: dict = self._load_config(self.config_dir / "rules/exclusion_rules.yaml")
-        self.camera_shift_rules: dict = self._load_config(self.config_dir / "rules/camera_shift_rules.yaml")
+        self.annotation_rules: dict = u.load_config(self.config_dir / "rules/annotation_rules.yaml")
+        self.clip_duration_rules: dict = u.load_config(self.config_dir / "rules/clip_duration_rules.yaml")
+        self.exclusion_rules: dict = u.load_config(self.config_dir / "rules/exclusion_rules.yaml")
+        self.camera_shift_rules: dict = u.load_config(self.config_dir / "rules/camera_shift_rules.yaml")
 
         # setup path
         self.paths: PathConfig = PathConfig(project_name=self.name)
@@ -61,13 +59,7 @@ class Project(BaseProject):
             print(f"\nWARNING: Could not load joblib files: {e}")
             self.trialgroup = None
 
-        
-
-    @staticmethod
-    def _load_config(filename: Path):
-        with open(filename, "r") as cfg_file:
-            cfg = yaml.safe_load(cfg_file)
-        return cfg
+            
 
     @process_time
     def split_trials(self): 
@@ -157,6 +149,13 @@ class Project(BaseProject):
 
         trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
 
+        if trial.date.isoformat() in self.exclusion_rules[trial.subject] :
+            for stage in ("clip_openable", "view_match_task", "task"):
+                trial.set_success(stage=stage, success=False, reason="Excluded by date")
+            trial.set_group(laser_state="UNKNOWN", mvt_type="UNKNOWN")
+            return trial
+        
+        
         # 2. the ONLY step that differs: LED info
         if update:
             trial.update(
@@ -372,11 +371,12 @@ class Project(BaseProject):
 
             for bodypart in BODYPARTS: 
 
-                traj = Trajectory(
+                traj = TrajectoryDLC(
                     coords_path=trial.pred_path,
                     view=trial.camera_view,
                     bodypart=bodypart,
                     cm_per_pixel=trial.cm_per_pixel,
+                    time_pad_off=trial.time_pad_off,
                     shift=trial.camera_shift,
                 )
 
@@ -497,12 +497,10 @@ class Project(BaseProject):
             pd.Series(trial_states).to_csv(preprocess_dir / f"validation_state_{stamp}.csv")
 
         # save validation state
-        n_state = 0
         for trial in tqdm(self.trialgroup.trials, desc="Saving validation"):
             if not trial.is_valid(): 
                 continue
 
-            success = []
             for bodypart in BODYPARTS: 
                 
                 state = trial_states.get(f"{bodypart}_{trial.name}")
@@ -510,11 +508,9 @@ class Project(BaseProject):
                 if not state:
                     continue
 
-                n_state += 1
-                success.append(state)
-                traj: Trajectory = trial.trajectories.get(bodypart)
+                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
 
-                if state == "rejected" or "rejected" in success:
+                if state == "rejected" :
                     traj.set_success(stage="validation", success=False, reason="man reject")
                     continue
 
@@ -546,24 +542,26 @@ class Project(BaseProject):
             if not trial.is_valid():    
                 continue
 
-            # if all(traj.is_valid() for traj in trial.trajectories.values()): 
+            # compute behavior state
 
-            #     Boxes = BehaviorBox(coords=trial.trajectories,
-            #                         time_pad_off=trial.time_pad_off,
-            #                         shift=trial.camera_shift,
-            #                         name=trial.name)
-            
+            if all(traj.is_valid() for traj in trial.trajectories.values()): 
 
-            # trial.update(behaviorBox=Boxes)
+                behavior = Behavior(coords=trial.trajectories,
+                                    time_pad_off=trial.time_pad_off,
+                                    shift=trial.camera_shift,
+                                    name=trial.name)
+                trial.update(behavior=behavior)
+
+            # compute metrics for each trajectories
 
             for bodypart in BODYPARTS: 
 
-                traj: Trajectory = trial.trajectories.get(bodypart)
+                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
                 
                 if not traj.is_valid(): 
                     continue
                 
-                traj.clean_coords = traj.compute_instant_metrics(traj.clean_coords)
+                traj.clean_coords = traj.compute_instant_metrics()
                 # TODO
                 # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
 
@@ -614,7 +612,7 @@ class Project(BaseProject):
             if not trial.is_valid() or i%100 != 0: 
                 continue
             
-            traj: Trajectory = trial.trajectories.get(bodypart)
+            traj: TrajectoryDLC = trial.trajectories.get(bodypart)
 
             if not traj.is_valid(): 
                 continue

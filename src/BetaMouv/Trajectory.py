@@ -1,7 +1,7 @@
 # src/BetaMouv/Trajectory.py
 
 
-from src.Base.Trajectory import Trajectory as BaseTrajectory
+from src.Base.Trajectory import TrajectoryDLC as BaseTrajectory
 from .File import File
 
 import pandas as pd
@@ -10,27 +10,63 @@ from scipy.interpolate import make_splrep, splev
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+from pathlib import Path
 
+import src.utils as u
 
 
 custom_params = {"axes.spines.right": False, "axes.spines.top": False}
 sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
 
 
-class Trajectory(BaseTrajectory): 
+# load project_info.yaml to get constant related to the protocole
+cfg = u.load_config("./config/BetaMouv/project_info.yaml")
+
+
+class TrajectoryDLC(BaseTrajectory): 
 
     file_cls = File 
     STAGES = ("outlier", "validation")
 
-
-    ################## Trajectory filtration method ###############
-    # specific to this project
-
-    def __init__(self, coords_path, view, bodypart = "finger_3", fps = 125, frame_width = 512, frame_height = 512, cm_per_pixel = None, shift = (0,0)):
-        super().__init__(coords_path, view, bodypart, fps, frame_width, frame_height, cm_per_pixel, shift)
+    def __init__(self,
+                coords_path: Path,
+                view: str,
+                bodypart: str = "finger_3",
+                cm_per_pixel: float | None = 1,
+                time_pad_off: float = None,
+                shift: tuple[float] | None = (0,0)):
+        super().__init__(coords_path, view, bodypart, cm_per_pixel, time_pad_off, shift)
 
         self.interpolated_coords = None
         self.clean_coords = None
+
+        # some constants from cfg
+        self.dt = 1 / cfg["fps"]
+        self.LEVER_POS = self._point_to_scaled_cartesian(cfg["lever_position"][0], cfg["lever_position"][1])
+        self.PAD_POS = self._point_to_scaled_cartesian(cfg["pad_position"][0], cfg["pad_position"][0])
+        self.FRAME_WIDTH_CM =  cfg["frame_width_px"] * self.cm_per_pixel
+        self.FRAME_HEIGHT_CM =  cfg["frame_height_px"] * self.cm_per_pixel
+
+    # ----------- metrics computation -----------
+
+    def compute_instant_metrics(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
+        if coords is None:
+            coords = self.clean_coords
+
+        coords = coords.copy()
+        coords["instant_velocity"] = self.instant_velocity(coords)
+        coords["instant_speed"] = self.instant_speed(coords)
+        coords["angle"] = self.angle(coords)
+        coords["lever_distance"] = self.obj_bodypart_distance(coords, self.LEVER_POS)
+        coords["distances"] = self.distances(coords)
+        coords["acc"] = self.acceleration(coords)
+        coords["signed_acc"] = self.signed_acceleration(coords)
+
+        return coords
+
+
+
+    # ------------------------ preprocessing methods --------------------
 
 
     @staticmethod
@@ -355,7 +391,7 @@ class Trajectory(BaseTrajectory):
         plt.close()
 
 
-    def plot_tendency(self, value , save_as, group, time_pad_off, 
+    def plot_tendency(self, coords: pd.DataFrame, value , save_as, group, 
                       laser_state: str= "LaserOff", show_angle: bool=False):
         """
         Plot velocity tendency with error span around the average.
@@ -365,17 +401,15 @@ class Trajectory(BaseTrajectory):
             difference between a sample mean and the population mean is 3'
         """
         from scipy.stats import sem
-        
-        data = self.clean_coords.copy()
 
-        if self.crop_laser_period: 
-            data = self.crop_xy(data, time_pad_off - 0.1, time_pad_off + 0.4)
+        if coords is None: 
+            coords = self.clean_coords.copy()
 
-        data["relative_t"] = (data["t"] - time_pad_off).round(3)
+        coords["relative_t"] = (coords["t"] - self.time_pad_off).round(3)
 
         fig, ax = plt.subplots(figsize=[8, 8])
         
-        ax.plot(data["relative_t"], data[value], color="k", marker=".")
+        ax.plot(coords["relative_t"], coords[value], color="k", marker=".")
         
         ax.axvline(x=0, color="k", label="time pad off", linestyle="--", lw=1)
         ax.axhline(y=0, color="k", linestyle="--", lw=1)

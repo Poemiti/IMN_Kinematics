@@ -9,40 +9,186 @@ from .Outcome import Outcome
 import matplotlib.pyplot as plt
 
 
-
 class Trajectory: 
-    """A trajectory is defined in a classical cartesian plane, in cm"""
+    """Method only class to compute stuff on coordinates (pd.Dataframes) containing: x, y, t"""
+
+    def __init__(self, coords: pd.DataFrame | None = None):
+        self.coords = coords   
+        self.dt = coords["t"].diff()
+
+
+    # ------------- plotting function ------------    
+
+    def plot_traj(self, coords: pd.DataFrame, ax: plt.axes, fig, 
+                  color: str = "k", show_time: bool= False) -> plt.axes: 
+        
+        ax.plot(coords["x"], coords["y"], color=color)
+        sc = ax.scatter(coords["x"], coords["y"], 
+                        c=coords["t"] if show_time else color, 
+                        cmap="viridis" if show_time else None)
+        
+        if show_time: 
+            cbar = fig.colorbar(sc, ax=ax)
+            cbar.set_label("t")
+
+        return ax
+
+
+    def show_traj(self, coords: pd.DataFrame, show: bool=False):
+        if coords is None:
+            coords = self.coords.copy()
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        ax = self.plot_traj(coords, ax, fig)
+
+        name = self.file.name.replace("pred_results_", "")
+        title = name[:len(name)//2] + "\n" + name[len(name)//2:]
+
+        ax.set(
+            # xlim=(0, self.frame_height * self.cm_per_pixel),
+            # ylim=(0, self.frame_height * self.cm_per_pixel),
+            title=title,
+            xlabel="X position (cm)",
+            ylabel="Y position (cm)",
+        )
+
+        if show: 
+            plt.show()
+        plt.close()
+
+        return fig
+
+
+    ############## Compute some metrics ###################
+
+    def crop_xy(self, coords: pd.DataFrame = None, start: float = 0, end: float = 0.4) -> pd.DataFrame :  
+        """Crop coordinates from [start : end]"""
+        if coords is None:
+            coords = self.coords
+
+        return coords.loc[
+            (coords["t"] >= start) &
+            (coords["t"] <= end)
+        ].reset_index(drop=True)
+    
+
+    def distances(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
+        """Instantaneous distances between each points"""
+        if coords is None:
+            coords = self.coords
+
+        v = coords[["x", "y"]].diff()
+
+        return np.hypot(v["x"], v["y"])
+
+
+    def velocity_vector(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
+        """Instantaneous velocity components."""
+        if coords is None:
+            coords = self.coords
+
+        v = coords[["x", "y"]].diff() / self.dt
+
+        return pd.DataFrame({
+            "t": coords["t"],
+            "vx": v["x"],
+            "vy": v["y"]
+        })
+
+    def instant_speed(self, coords=None):
+        """Scalar, >= 0, no direction."""
+        v = self.velocity_vector(coords)
+
+        return np.hypot(v["vx"], v["vy"])
+
+
+    def instant_velocity(self, coords=None, direction=(-1, 1)) -> pd.Series:
+        """Velocity projected on `direction`.
+        > 0 : moving toward `direction` (default: upper-left)
+        < 0 : moving away from it
+        """
+
+        u = np.asarray(direction, float)
+        u /= np.linalg.norm(u)
+        v = self.velocity_vector(coords)
+
+        cond = (v["vx"] < 0) & (v["vy"] > 0)          # upper-left, as in your docstring
+        sign = np.where(cond, 1, -1)
+        return sign * np.hypot(v["vx"], v["vy"])
+        
+        # return v["vx"] * u[0] + v["vy"] * u[1]
+
+
+    def radial_velocity(self, coords=None): 
+        
+        xl, yl = self._point_to_scaled_cartesian(self.XL, self.YL)
+
+        disp = (xl, yl) - coords[["x", "y"]]
+        u = disp.div(np.linalg.norm(disp, axis=1), axis=0)      # unit vector lever -> point
+        v = self.velocity_vector(coords)
+
+        return v["vx"] * u["x"] + v["vy"] * u["y"]        
+
+
+
+    def acceleration(self, coords: pd.DataFrame | None = None) -> np.array :
+        v = self.velocity_vector(coords)[["vx", "vy"]]
+        a = v.diff() / self.dt
+        return (np.sqrt(a["vx"]**2 + a["vy"]**2))
+
+
+    def signed_acceleration(self, coords=None, direction=(-1, 1)):
+        return self.instant_velocity(coords, direction).diff() / self.dt
+
+
+    def obj_bodypart_distance(self, bodypart_coords: pd.DataFrame | None = None, obj_coord: list = [0,0]) -> np.array : 
+        """Compute the straight/net distance between an object (obj_coords) and the bodypart choosen"""
+        if bodypart_coords is None:
+            bodypart_coords = self.coords
+
+        return np.linalg.norm(bodypart_coords[["x", "y"]] - obj_coord, axis=1)
+
+
+    def angle(self, coords=None):
+        """Compute angle over time"""
+        if coords is None: 
+            coords = self.coords
+
+        dx = coords["x"].diff()
+        dy = coords["y"].diff()
+
+        return np.degrees(np.arctan2(dy, -dx))
+
+
+
+
+
+class TrajectoryDLC(Trajectory):
+
+    """Allow to open the DLC output and have more information
+    related to the trial"""
 
     file_cls = BaseFile
     STAGES = ()
-
-    XL, YL = (55, 230)   # lever position (px)
-    XP, YP = (315, 348)   # pad position (px)
 
     def __init__(self,
                 coords_path: Path,
                 view: str,
                 bodypart: str = "finger_3",
-                fps: int = 125,
-                frame_width: int = 512,     # px
-                frame_height: int = 512,    #px
                 cm_per_pixel: float | None = None,
+                time_pad_off: float = None,
                 shift: tuple[float] | None = (0,0)): 
 
         self.file = self.file_cls(coords_path)
 
+        self.time_pad_off = time_pad_off
         self.coords_path = coords_path
         self.view = view
         self.bodypart = bodypart
-        self.fps = fps
-        self.dt = 1 / fps
-        self.frame_width = frame_width
-        self.frame_height = frame_height
         self.cm_per_pixel = cm_per_pixel
         self.shift = shift
-        self.stage_outcomes = {
-            name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)
-        }
+        self.stage_outcomes = {name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)}
 
         # raw pixel coordinates, untouched — kept for debugging / overlaying on the source video
         self.raw_coords = self._open_DLC_results()
@@ -53,16 +199,9 @@ class Trajectory:
         self.raw_coords[["x", "y"]] = self.raw_coords[["x", "y"]] + self.shift
 
         # setup coordinates into cartesian plane (bottom-left origin) + cm units
-        self.coords = self._array_to_scaled_cartesian(self.raw_coords)
+        self.raw_coords = self._array_to_scaled_cartesian(self.raw_coords)
 
-        self.crop_laser_period = False
-        self.time_pad_off = None
-        
-        
-    def crop_coords(self, bool_val: bool, time_pad_off: float = None): 
-        self.crop_laser_period = bool_val
-        self.time_pad_off = time_pad_off
-        print("Coordinates cropped from pad_off to end of laser stimulation !")
+        super().__init__(self.raw_coords)
 
 
     ############## Success function #############
@@ -155,174 +294,3 @@ class Trajectory:
         clean_df = df.iloc[1:].reset_index(drop=True)
 
         return clean_df
-
-
-    def plot_traj(self, coords: pd.DataFrame, ax: plt.axes, fig, 
-                  color: str = "k", show_time: bool= False) -> plt.axes: 
-        
-        ax.plot(coords["x"], coords["y"], color=color)
-        sc = ax.scatter(coords["x"], coords["y"], 
-                        c=coords["t"] if show_time else color, 
-                        cmap="viridis" if show_time else None)
-
-        if self.crop_laser_period: 
-            laser_coords = self.crop_xy(coords, self.time_pad_off+0.025, self.time_pad_off+0.325)
-            ax.scatter(laser_coords["x"], laser_coords["y"], 
-                        c="red")
-        
-        if show_time: 
-            cbar = fig.colorbar(sc, ax=ax)
-            cbar.set_label("t")
-
-        return ax
-
-
-    def show_traj(self, coords: pd.DataFrame, show: bool=False):
-        if coords is None:
-            coords = self.coords.copy()
-
-        if self.crop_laser_period: 
-            coords=self.crop_xy(coords, self.time_pad_off - 0.1, self.time_pad_off + 0.4)
-
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        ax = self.plot_traj(coords, ax, fig)
-
-        name = self.file.name.replace("pred_results_", "")
-        title = name[:len(name)//2] + "\n" + name[len(name)//2:]
-
-        ax.set(
-            # xlim=(0, self.frame_height * self.cm_per_pixel),
-            # ylim=(0, self.frame_height * self.cm_per_pixel),
-            title=title,
-            xlabel="X position (cm)",
-            ylabel="Y position (cm)",
-        )
-
-        if show: 
-            plt.show()
-        plt.close()
-
-        return fig
-
-
-
-
-    ############## Compute some metrics ###################
-
-    def crop_xy(self, coords: pd.DataFrame = None, start: float = 0, end: float = 0.4) -> pd.DataFrame :  
-        """Crop coordinates from [start : end]"""
-        if coords is None:
-            coords = self.coords
-
-        return coords.loc[
-            (coords["t"] >= start) &
-            (coords["t"] <= end)
-        ].reset_index(drop=True)
-
-    def compute_instant_metrics(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
-        if coords is None:
-            coords = self.coords
-
-        coords = coords.copy()
-        coords["instant_velocity"] = self.instant_velocity(coords)
-        coords["instant_speed"] = self.instant_speed(coords)
-        coords["angle"] = self.angle(coords)
-        coords["lever_distance"] = self.lever_bodypart_distance(coords)
-        coords["distances"] = self.distances(coords)
-        coords["acc"] = self.acceleration(coords)
-        coords["signed_acc"] = self.signed_acceleration(coords)
-
-        return coords
-
-
-    def distances(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
-        """Instantaneous distances between each points"""
-        if coords is None:
-            coords = self.coords
-
-        v = coords[["x", "y"]].diff()
-
-        return np.hypot(v["x"], v["y"])
-
-
-    def velocity_vector(self, coords: pd.DataFrame | None = None) -> pd.DataFrame:
-        """Instantaneous velocity components."""
-        if coords is None:
-            coords = self.coords
-
-        v = coords[["x", "y"]].diff() / self.dt
-
-        return pd.DataFrame({
-            "t": coords["t"],
-            "vx": v["x"],
-            "vy": v["y"]
-        })
-
-    def instant_speed(self, coords=None):
-        """Scalar, >= 0, no direction."""
-        v = self.velocity_vector(coords)
-
-        return np.hypot(v["vx"], v["vy"])
-
-
-    def instant_velocity(self, coords=None, direction=(-1, 1)) -> pd.Series:
-        """Velocity projected on `direction`.
-        > 0 : moving toward `direction` (default: upper-left)
-        < 0 : moving away from it
-        """
-
-        u = np.asarray(direction, float)
-        u /= np.linalg.norm(u)
-        v = self.velocity_vector(coords)
-
-        cond = (v["vx"] < 0) & (v["vy"] > 0)          # upper-left, as in your docstring
-        sign = np.where(cond, 1, -1)
-        return sign * np.hypot(v["vx"], v["vy"])
-        
-        # return v["vx"] * u[0] + v["vy"] * u[1]
-
-
-    def radial_velocity(self, coords=None): 
-        
-        xl, yl = self._point_to_scaled_cartesian(self.XL, self.YL)
-
-        disp = (xl, yl) - coords[["x", "y"]]
-        u = disp.div(np.linalg.norm(disp, axis=1), axis=0)      # unit vector lever -> point
-        v = self.velocity_vector(coords)
-
-        return v["vx"] * u["x"] + v["vy"] * u["y"]        
-
-
-
-    def acceleration(self, coords: pd.DataFrame | None = None) -> np.array :
-        v = self.velocity_vector(coords)[["vx", "vy"]]
-        a = v.diff() / self.dt
-        return (np.sqrt(a["vx"]**2 + a["vy"]**2))
-
-
-    def signed_acceleration(self, coords=None, direction=(-1, 1)):
-        return self.instant_velocity(coords, direction).diff() / self.dt
-
-
-    def lever_bodypart_distance(self, coords: pd.DataFrame | None = None) -> np.array : 
-        """Compute the straight/net distance between the lever and the bodypart choosen"""
-        if coords is None:
-            coords = self.coords
-
-        xy = coords[["x", "y"]]
-        xl, yl = self._point_to_scaled_cartesian(self.XL, self.YL)
-        disp = xy - (xl, yl)
-
-        return np.linalg.norm(disp, axis=1)
-
-
-    def angle(self, coords=None, direction=(-1, 1)):
-        """Compute angle over time"""
-        if coords is None: 
-            coords = self.coords
-
-        dx = coords["x"].diff()
-        dy = coords["y"].diff()
-
-        return np.degrees(np.arctan2(dy, -dx))

@@ -10,11 +10,11 @@ config_log: None
 # Boolean only
 
 steps:  # ordered
-  split_trials: t
-  build_metadata: 
+  split_trials: 
+  build_metadata: t
   run_prediction: 
-  run_preprocessing:  
+  run_preprocessing: t  
   run_validation: 
-  compute_metrics: 
+  compute_metrics: t
   analysis: 
 
