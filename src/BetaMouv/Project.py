@@ -120,9 +120,10 @@ class Project(BaseProject):
 
         joblib_files = list(self.paths.trials_metadata.glob("*.joblib"))
         print(f"{len(joblib_files)} joblib metadata files ({self.paths.trials_metadata})")
-        res = input("Overwrite (o), update (u) or quit (q) ? : ").strip().lower()
+        res = "o"
+        # res = input("Overwrite (o), update (u) or quit (q) ? : ").strip().lower()
 
-        if res in ("o", ""):
+        if res in ("o", "") or len(joblib_files) == 0:
             return self._run_metadata(update=False)
         if res == "u":
             return self._run_metadata(update=True)

@@ -88,15 +88,15 @@ class File(BaseFile):
                 result["task"] = t
                 break
 
-        # # Second pass: derived defaults 
-        # if result["laser_intensity"] == "Unknown" :
+        # Second pass: derived defaults 
+        if result["laser_intensity"] == "Unknown" :
 
-        #     if result["laser_type"] == "Beta":
-        #         result["laser_intensity"] = "1mW"
-        #     elif result["laser_type"] == "Conti":
-        #         result["laser_intensity"] = "0,5mW"
-        #     elif result["laser_type"] == "NOstim":
-        #         result["laser_intensity"] = "NOstim"
+            if result["laser_type"] == "Beta":
+                result["laser_intensity"] = "1mW"
+            elif result["laser_type"] == "Conti":
+                result["laser_intensity"] = "0,5mW"
+            elif result["laser_type"] == "NOstim":
+                result["laser_intensity"] = "NOstim"
 
         return result
 
