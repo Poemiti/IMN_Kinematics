@@ -27,6 +27,7 @@ class TrialGroup:
         # display output
 
         print(f"\n--> {len(self.keep_joblib)}/{len(self.filenames)} FILES LOADED")
+        print(f"--> {len(self.trials)} trials")
         print(self.group_name)
 
 

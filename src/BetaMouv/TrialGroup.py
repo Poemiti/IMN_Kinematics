@@ -10,6 +10,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np 
+from pathlib import Path
 
 
 custom_params = {"axes.spines.right": False, "axes.spines.top": False}
@@ -82,9 +83,12 @@ class TrialGroup(BaseTrialGroup):
                             "stage": stage,
                             "success": outcome.success,
                             "reason": outcome.reason,
-                        })
+                            "is_valid": "valid" if trial.is_valid() else "not_valid",
+                            "reason": trial.failure()                        
+                            })
 
             self._success_df = pd.DataFrame(records)
+
 
         return self._success_df
 
@@ -203,8 +207,6 @@ class TrialGroup(BaseTrialGroup):
 
     def success_rate(self, df, col, save_as, show: bool = False):
         """Display success rate and failure reasons per stage, and save the report."""
-
-        df = self.success_df()
 
         g = sns.catplot(
             data=df, kind="count",
@@ -417,7 +419,7 @@ class TrialGroup(BaseTrialGroup):
         return self.plot_tendency(data=data, save_as=save_as, x=x, y=y, show_units=show_units,
                                   title=f"{y} - n trials: {len(data.groupby('name'))}",)
 
-    def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False)): 
+    def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False): 
         data = self.self.timeseries_df(bodypart)
         return self.plot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units,
                                   title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
@@ -463,3 +465,99 @@ class TrialGroup(BaseTrialGroup):
         
         plt.show()
         plt.close()
+
+
+
+    def sunburst_metadata(self, output_dir: Path, title: str,
+                        subfig_group: str = None,
+                        groups: list[str] = ["subject", "view"],
+                        show_total: bool = True):
+        """Generate a sunburst figure in the order of the groups given. 
+        If a subfig_group is given, it will split into has many sunburst as they are subfig.
+        The outpath will follow the groups order."""
+        import plotly.express as px
+        from plotly.subplots import make_subplots
+
+        data = self.success_df()
+        data = data.drop_duplicates(subset="name", keep="first")
+
+        filename = "_".join(groups)
+        if subfig_group: 
+            filename = subfig_group.upper() + "_" + filename
+        save_as = output_dir / filename 
+
+        # ---------------- CASE 1: no subfig_groups
+
+        if subfig_group is None:
+            counts = (
+                data
+                .groupby(groups)
+                .size()
+                .reset_index(name="count")
+            )
+
+            fig = px.sunburst(
+                counts,
+                path=groups,
+                values="count",
+                color_discrete_sequence=px.colors.qualitative.D3   
+            )
+
+            fig.update_layout(title=title)
+
+            fig.update_traces(
+                branchvalues="total" if show_total else "remainder",
+                texttemplate="<b>%{label}</b><br>%{value} (%{percentParent:.0%})",
+                textfont_size=25
+            )
+
+            fig.write_html(str(save_as.with_suffix(".html")))
+            fig.show()
+            return
+
+        # ---------------- CASE 2: subfig_groups
+
+        subgroups = sorted(data[subfig_group].dropna().unique())
+
+        fig = make_subplots(
+            rows=1,
+            cols=len(subgroups),
+            specs=[[{"type": "domain"}] * len(subgroups)],
+            subplot_titles=subgroups
+        )
+
+        for i, g in enumerate(subgroups, start=1):
+
+            tmp = data[data[subfig_group] == g]
+
+            counts = (
+                tmp
+                .groupby(groups)
+                .size()
+                .reset_index(name="count")
+            )
+
+            pie = px.sunburst(
+                counts,
+                path=groups,
+                values="count",
+                color=groups[0],
+                color_discrete_sequence=px.colors.qualitative.D3     
+            )
+
+            fig.add_trace(
+                pie.data[0],
+                row=1,
+                col=i
+            )
+
+        fig.update_traces(
+            branchvalues="total",
+            texttemplate="<b>%{label}</b><br>%{value} (%{percentParent:.0%})",
+            textfont_size=25
+        )
+
+        fig.update_layout(title=title)
+
+        fig.write_html(str(save_as.with_suffix(".html")))
+        fig.show()

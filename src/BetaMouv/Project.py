@@ -118,10 +118,9 @@ class Project(BaseProject):
 
         joblib_files = list(self.paths.trials_metadata.glob("*.joblib"))
         print(f"{len(joblib_files)} joblib metadata files ({self.paths.trials_metadata})")
-        res = "o"
-        # res = input("Overwrite (o), update (u) or quit (q) ? : ").strip().lower()
+        res = input("Overwrite (o), update (u) or quit (q) ? : ").strip().lower()
 
-        if res in ("o", "") or len(joblib_files) == 0:
+        if res in ("o", ""):
             return self._run_metadata(update=False)
         if res == "u":
             return self._run_metadata(update=True)
@@ -587,40 +586,75 @@ class Project(BaseProject):
         import seaborn as sns
         custom_params = {"axes.spines.right": False, "axes.spines.top": False}
         sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
-
-
         
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
 
-        bodypart = "finger_3"
+
+        # ___________________________________________________________________________________________
+        ################################# SUCCESS RATE / METADATA REPORT #############################
+
+
+
+        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+        self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
+
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
+                                          subfig_group=None, 
+                                          groups=["subject", "laser_intensity"],
+                                          title=self.trialgroup.group_name)
+
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+                                          subfig_group="condition", 
+                                          groups=["subject", "laser_type", "laser_intensity"],
+                                          title=self.trialgroup.group_name)
+
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+                                          subfig_group=None, 
+                                          groups=["subject", "is_valid", "reason"],
+                                          title=self.trialgroup.group_name)
+
+
+        # _________________________________________________________________________________
+        ################################# BEHAVIOR ANALYSIS #############################
+
               
-        self.trialgroup.crop_coords(True)
+        # self.trialgroup.crop_coords(True)
 
-        features = [
-                    "area", 
-                    "centroid_direction", 
-                    "centroid_velocity", 
-                    "centroid_speed", 
-                    "centroid_acc", 
-                    "f3_sp_distance", 
-                    "f3_sp_angle", 
-                    "centroid_lever_dist"
-        ]
+        # features = [
+        #             "area", 
+        #             "centroid_direction", 
+        #             "centroid_velocity", 
+        #             "centroid_speed", 
+        #             "centroid_acc", 
+        #             "f3_sp_distance", 
+        #             "f3_sp_angle", 
+        #             "centroid_lever_dist"
+        # ]
 
-        for feat in features: 
-            self.trialgroup.plot_tendency_beha_features(
-                                save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
-                                x="relative_t", y=feat)
+        # for feat in features: 
+        #     self.trialgroup.plot_tendency_beha_features(
+        #                         save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
+        #                         x="relative_t", y=feat)
         
-        self.trialgroup.plot_tendency_beha_features(
-                            save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),
-                            x="x", y="y") 
+        # self.trialgroup.plot_tendency_beha_features(
+        #                     save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),
+        #                     x="x", y="y") 
+
+
+
+        # _________________________________________________________________________________
+        ################################# TRAJECTORY ANALYSIS #############################
+
+        ################################# ALL TRAJ
+        ################################# Timeseries
+
+
+        # bodypart = "finger_3"
 
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
         # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
         # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")
-        # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
         # timeseries_metric = [
         #                     "x", 
@@ -638,6 +672,17 @@ class Project(BaseProject):
         #         save_as=u.make_path(analysis_dir / "tendency" / bodypart, f"{val}.svg"),
         #         # show_units=True,
         #     )
+
+
+        ################################# ALL TRAJ
+        ################################# Scalar series
+
+        # ....
+
+
+        ################################# SINGLE TRAJ 
+        ################################# Timeseries
+        # TODO Update crop_coords
 
         # i = 0
         # for trial in tqdm(self.trialgroup.trials, desc="plotting timeseries"): 
@@ -663,6 +708,4 @@ class Project(BaseProject):
         #                            show_angle= val == "angle",
         #                            save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
 
-
-        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
     

@@ -132,11 +132,11 @@ class Trial:
         limit = self.trial_outcomes[upto].order if upto else float("inf")
         return all(o.success for o in self.trial_outcomes.values() if o.order <= limit)
 
-    def failure(self) -> Outcome | None:
+    def failure(self) -> str:
         for outcome in sorted(self.trial_outcomes.values()):
             if not outcome.success:
-                return outcome
-        return None
+                return outcome.reason
+        return "successful"
 
 
     def dlc_predict(self, model_path: Path, 
