@@ -3,20 +3,20 @@
 # movement type
 mvt_type: 
   CONTRA: t
-  IPSI: 
-  UNKNOWN:
+  IPSI: t
+  UNKNOWN: t
 
 # condition
 condition: 
   CHR: t
-  CTRL: 
+  CTRL: t
 
 # subject
 subject: 
-  "#517": t
+  "#517": 
   "#525": 
   "#521": 
-  "#531": t
+  "#531": 
   "#527": 
   "#516": 
 

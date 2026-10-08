@@ -164,46 +164,55 @@ class TrialGroup(BaseTrialGroup):
     
     ####################### plotting methods ###########################
 
-    def trial_success_rate(self, save_as):
+    def trial_success_rate(self, save_as, show: bool = False):
         """Display success rate and failure reasons per stage, and save the report."""
 
         df = self.success_df()
 
         g = sns.catplot(
             data=df, kind="count",
-            x="reason",
-            col="stage", hue="success", palette=BOOL_PALETTE,
-            sharex=False,
+            y="reason",
+            row="stage", hue="success", palette=BOOL_PALETTE,
+            sharey=False, height=4, aspect=3,
         )
         
-        g.set_xticklabels(rotation=45, ha="right")
-        g.set_axis_labels("", "Number of trials")
-        g.set_titles(col_template="{col_name}")
-        g.figure.suptitle("Trial success rate by stage")
-        g.figure.subplots_adjust(top=0.80)
+        # g.set_xticklabels(rotation=45, ha="right")
+        g.set_axis_labels("Number of trials", "")
+        g.set_titles(row_template="{row_name}")
+        g.figure.suptitle(f"Trial success rate by stage - n_trials: {len(self.trials)}\n{self.group_name}")
+        g.figure.subplots_adjust(top=0.90)
 
-        # annotate each bar with its % of that stage's total trial count
-        for stage, ax in zip(g.col_names, g.axes.flat):
+        # Annotate each bar with its % of that stage's total trial count
+        for stage, ax in zip(g.row_names, g.axes.flat):
             stage_total = (df["stage"] == stage).sum()
+
             if stage_total == 0:
                 continue
 
             for bar in ax.patches:
-                height = bar.get_height()
-                if height <= 0:
+                width = bar.get_width()
+
+                if width <= 0:
                     continue
 
-                rate = 100 * height / stage_total
+                rate = 100 * width / stage_total
+
                 ax.annotate(
                     f"{rate:.1f}%",
-                    xy=(bar.get_x() + bar.get_width() / 2, height),
-                    xytext=(0, 3),
+                    xy=(
+                        width,
+                        bar.get_y() + bar.get_height() / 2,
+                    ),
+                    xytext=(5, 0),
                     textcoords="offset points",
-                    ha="center", va="bottom", fontsize=12
+                    ha="left",
+                    va="center",
+                    fontsize=12,
                 )
 
         g.figure.savefig(save_as, bbox_inches="tight")
-        plt.show()
+        if show: 
+            plt.show()
         plt.close(g.figure)
 
         print(f"Report saved to: {save_as}")

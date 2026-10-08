@@ -16,6 +16,7 @@ class TrialGroup:
         self.filenames = filenames
         self.condition = condition
 
+        self.keep_joblib = []
         self.trials: list[BaseTrial] = self._filter_joblib()
 
         self.keep_val = []
@@ -23,16 +24,23 @@ class TrialGroup:
             self.keep_val.extend(value for value, keep in criteria.items() if keep)
         self.group_name = "_".join(self.keep_val)
 
+        # display output
+
+        print(f"\n--> {len(self.keep_joblib)}/{len(self.filenames)} FILES LOADED")
+        print(self.group_name)
+
+
     def _filter_joblib(self) -> list[dict]:
         trials = []
 
         for filename in self.filenames:
             if self._keep_file(filename):
 
+                self.keep_joblib.append(filename)
                 records: list = joblib.load(filename)   # list of Trial objects
                 trials.extend(records)
-            else:
-                print(f"Not Keep: {filename.name}")
+            # else:
+            #     print(f"Not Keep: {filename.name}")
 
         return trials
 

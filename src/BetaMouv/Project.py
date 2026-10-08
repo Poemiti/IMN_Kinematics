@@ -57,8 +57,6 @@ class Project(BaseProject):
         else: 
             try:
                 self.trialgroup = (TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None)
-                print("\n-->", len(self.trialgroup.keep_val), "FILES LOADED")
-
             except EOFError as e:
                 print(f"\nWARNING: Could not load joblib files: {e}")
                 self.trialgroup = None
@@ -316,10 +314,14 @@ class Project(BaseProject):
             u.save(u.make_path(self.paths.trials_metadata, f"{group}.joblib"),
                    lambda p, t=trials: joblib.dump(t, p),)
 
-        self.trialgroup.trials = [trial
-                for trial_list in trials_by_group.values()
-                for trial in trial_list
-            ]
+        if self.trialgroup is None: 
+            joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
+            self.trialgroup = TrialGroup(joblib_filenames, self.conditions)
+        else: 
+            self.trialgroup.trials = [trial
+                    for trial_list in trials_by_group.values()
+                    for trial in trial_list
+                ]
 
     @process_time
     def run_prediction(self): 
@@ -586,18 +588,6 @@ class Project(BaseProject):
 
         bodypart = "finger_3"
 
-        for trial in tqdm(self.trialgroup.trials, desc="Behavior"): 
-
-            if not trial.is_valid() : 
-                continue
-
-            if trial.behavior is None: 
-                print("\nNO BEHAVIOR: ", trial.name)
-
-            else: 
-                print()
-                print(trial.behavior.features)
-                break
         # self.trialgroup.crop_coords(True)
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
@@ -647,5 +637,5 @@ class Project(BaseProject):
         #                            save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
 
 
-        # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
     
