@@ -194,7 +194,14 @@ class TrialGroup(BaseTrialGroup):
     
     ####################### plotting methods ###########################
 
-    def trial_success_rate(self, save_as, show: bool = False):
+    def trial_success_rate(self, save_as, show: bool = False): 
+        return self.success_rate(self.success_df(), None, save_as, show)
+
+    def trajectories_success_rate(self, save_as, show: bool = False): 
+            return self.success_rate(self.bodypart_success_df(), "bodypart", save_as, show)
+
+
+    def success_rate(self, df, col, save_as, show: bool = False):
         """Display success rate and failure reasons per stage, and save the report."""
 
         df = self.success_df()
@@ -202,14 +209,15 @@ class TrialGroup(BaseTrialGroup):
         g = sns.catplot(
             data=df, kind="count",
             y="reason",
-            row="stage", hue="success", palette=BOOL_PALETTE,
+            row="stage", col=col,
+            hue="success", palette=BOOL_PALETTE,
             sharey=False, height=4, aspect=3,
         )
         
         # g.set_xticklabels(rotation=45, ha="right")
         g.set_axis_labels("Number of trials", "")
         g.set_titles(row_template="{row_name}")
-        g.figure.suptitle(f"Trial success rate by stage - n_trials: {len(self.trials)}\n{self.group_name}")
+        g.figure.suptitle(f"Success rate by stage - n_trials: {len(self.trials)}\n{self.group_name}")
         g.figure.subplots_adjust(top=0.90)
 
         # Annotate each bar with its % of that stage's total trial count
@@ -247,30 +255,6 @@ class TrialGroup(BaseTrialGroup):
 
         print(f"Report saved to: {save_as}")
 
-
-    def trajectories_success_rate(self, save_as):
-
-        df = self.bodypart_success_df()
-
-        g = sns.catplot(
-            data=df, kind="count",
-            x="reason",
-            col="stage", row="bodypart",
-            hue="success", palette=BOOL_PALETTE,
-            sharex=False
-        )
-        
-        g.set_xticklabels(rotation=45, ha="right")
-        g.set_axis_labels("", "Number of trials")
-        g.set_titles(col_template="{col_name}", row_template="{row_name}")
-        g.figure.suptitle("Trajectory success rate by stage")
-        g.figure.subplots_adjust(top=0.80)
-
-        g.figure.savefig(save_as, bbox_inches="tight")
-        plt.show()
-        plt.close(g.figure)
-
-        print(f"Report saved to: {save_as}")
 
 
     def lineplot_all_traj(self, save_as, bodypart: str = "finger_3"):
@@ -426,60 +410,20 @@ class TrialGroup(BaseTrialGroup):
         plt.close()
 
 
-    def plot_tendency(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False): 
-        """
-        Plot velocity tendency with error span around the average.
-        Custome error functions available : 
-            - "sem" : Standard Error of the Mean (https://statisticsbyjim.com/hypothesis-testing/standard-error-mean/)
-            How to interprete SEM : 'For a SEM of 3, we know that the typical 
-            difference between a sample mean and the population mean is 3'
-        """
-        data = self.timeseries_df(bodypart)   
-
-        g = sns.FacetGrid(
-            data=data,
-            margin_titles=True,
-            col="laser_type", 
-            row="laser_intensity", 
-            height=6
-            )
-
-        g.map_dataframe(
-            sns.lineplot,
-            x="relative_t", y=value, 
-            hue="laser_state", style="laser_state" ,
-            palette=LASER_STATE_PALETTE, dashes=LASER_STATE_DASH,
-            estimator="mean",
-            errorbar = "se",  # SEM
-        )
-
-        if show_units:
-            g.map_dataframe(
-                sns.lineplot,
-                x="relative_t", y=value, 
-                units="name",
-                hue="laser_state", style="laser_state" , linewidth=0.5,
-                palette=LASER_STATE_PALETTE, 
-                alpha=0.3, estimator=None, sort=None,
-            )
-
-        g.add_legend()
-
-        g.set_titles(col_template="{col_name}", row_template="{row_name}")
-        g.set_axis_labels("Time (sec)", value)
-        g.figure.suptitle(f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}", ha='center')
-        g.figure.subplots_adjust(top=0.8)
-
-        g.savefig(save_as)
-        
-        plt.show()
-        plt.close()
 
 
+    def plot_tendency_beha_features(self, save_as: str, x="t", y="area", show_units: bool = False): 
+        data = self.behavior_features_df()
+        return self.plot_tendency(data=data, save_as=save_as, x=x, y=y, show_units=show_units,
+                                  title=f"{y} - n trials: {len(data.groupby('name'))}",)
 
-    def plot_tendency_beha_features(self, save_as: str, x="t", y="area", show_units: bool = False):
+    def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False)): 
+        data = self.self.timeseries_df(bodypart)
+        return self.plot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units,
+                                  title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
 
-        data = self.behavior_features_df()   
+    def plot_tendency(self, data, title, save_as: str, x="t", y="area", show_units: bool = False):
+
 
         g = sns.FacetGrid(
             data=data,
@@ -512,7 +456,7 @@ class TrialGroup(BaseTrialGroup):
 
         g.set_titles(col_template="{col_name}", row_template="{row_name}")
         g.set_axis_labels(x, y)
-        g.figure.suptitle(f"{y} - n trials: {len(data.groupby('name'))}", ha='center')
+        g.figure.suptitle(title,  ha='center')
         g.figure.subplots_adjust(top=0.8)
 
         g.savefig(save_as)
