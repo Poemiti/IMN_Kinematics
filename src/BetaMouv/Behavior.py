@@ -39,8 +39,8 @@ class Behavior:
 
 
         # features building
-        self.centroid = Trajectory(self.centroid())
-        self.features = self.centroid()              # initilisation with centroid
+        self.centroid = Trajectory(self.compute_centroid())
+        self.features = self.compute_centroid()              # initilisation with centroid
         self.features["area"] = self.area_triangle()
         self.features["centroid_direction"] = self.centroid.angle()
         self.features["centroid_velocity"] = self.centroid.instant_velocity()
@@ -86,7 +86,7 @@ class Behavior:
 
         return np.sqrt(dx**2 + dy**2)
 
-    def centroid(self, bp1: str = "soft_pad", bp2: str = "finger_3", bp3: str = "finger_2", 
+    def compute_centroid(self, bp1: str = "soft_pad", bp2: str = "finger_3", bp3: str = "finger_2", 
                  coords_set: dict[str, Trajectory] = None) -> pd.DataFrame: 
         """Compute the position of a centroid point between 3 bodyparts"""
         if coords_set is None:

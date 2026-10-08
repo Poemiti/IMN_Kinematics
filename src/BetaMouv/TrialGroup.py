@@ -43,6 +43,7 @@ class TrialGroup(BaseTrialGroup):
         self._scalar_df = None
         self._timeseries_df = None
         self._bodypart_success_df = None
+        self._behavior_features_df = None
 
         self.crop_laser_period = False
 
@@ -158,7 +159,36 @@ class TrialGroup(BaseTrialGroup):
             self._timeseries_df = pd.concat(frames, ignore_index=True)
 
         return self._timeseries_df
-    
+
+
+    def behavior_features_df(self): 
+        if self._behavior_features_df is None:
+            frames = []
+
+            for trial in tqdm(self.trials, desc="Building behavior_features_df"):
+                if not trial.is_valid() or trial.laser_intensity == "incompatible":
+                    continue
+
+                if trial.behavior is None: 
+                    continue
+
+                df = trial.behavior.features
+                traj = trial.trajectories["finger_3"]
+
+                if self.crop_laser_period: 
+                    df = traj.crop_xy(df, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
+
+                for col, val in trial.identity().items():
+                    df[col] = [val] * len(df)
+
+                df["index_order"] = range(len(df))
+                df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
+
+                frames.append(df)
+
+            self._behavior_features_df = pd.concat(frames, ignore_index=True)
+
+        return self._behavior_features_df
     
 
     
@@ -404,8 +434,6 @@ class TrialGroup(BaseTrialGroup):
             How to interprete SEM : 'For a SEM of 3, we know that the typical 
             difference between a sample mean and the population mean is 3'
         """
-        from scipy.stats import sem
-
         data = self.timeseries_df(bodypart)   
 
         g = sns.FacetGrid(
@@ -440,6 +468,51 @@ class TrialGroup(BaseTrialGroup):
         g.set_titles(col_template="{col_name}", row_template="{row_name}")
         g.set_axis_labels("Time (sec)", value)
         g.figure.suptitle(f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}", ha='center')
+        g.figure.subplots_adjust(top=0.8)
+
+        g.savefig(save_as)
+        
+        plt.show()
+        plt.close()
+
+
+
+    def plot_tendency_beha_features(self, save_as: str, x="t", y="area", show_units: bool = False):
+
+        data = self.behavior_features_df()   
+
+        g = sns.FacetGrid(
+            data=data,
+            margin_titles=True,
+            col="laser_type", 
+            row="laser_intensity", 
+            height=6
+            )
+
+        g.map_dataframe(
+            sns.lineplot,
+            x=x, y=y, 
+            hue="laser_state", style="laser_state" ,
+            palette=LASER_STATE_PALETTE, dashes=LASER_STATE_DASH,
+            estimator="mean",
+            errorbar = "se",  # SEM
+        )
+
+        if show_units:
+            g.map_dataframe(
+                sns.lineplot,
+                x=x, y=y, 
+                units="name",
+                hue="laser_state", style="laser_state" , linewidth=0.5,
+                palette=LASER_STATE_PALETTE, 
+                alpha=0.3, estimator=None, sort=None,
+            )
+
+        g.add_legend()
+
+        g.set_titles(col_template="{col_name}", row_template="{row_name}")
+        g.set_axis_labels(x, y)
+        g.figure.suptitle(f"{y} - n trials: {len(data.groupby('name'))}", ha='center')
         g.figure.subplots_adjust(top=0.8)
 
         g.savefig(save_as)

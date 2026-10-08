@@ -14,7 +14,7 @@ class Trajectory:
 
     def __init__(self, coords: pd.DataFrame | None = None):
         self.coords = coords   
-        self.dt = coords["t"].diff()
+        self.dt = coords["t"][1] 
 
 
     # ------------- plotting function ------------    
@@ -103,14 +103,10 @@ class Trajectory:
         return np.hypot(v["vx"], v["vy"])
 
 
-    def instant_velocity(self, coords=None, direction=(-1, 1)) -> pd.Series:
-        """Velocity projected on `direction`.
-        > 0 : moving toward `direction` (default: upper-left)
-        < 0 : moving away from it
+    def instant_velocity(self, coords=None,) -> pd.Series:
+        """Velocity is a vector composed of a direction (sign) and a norm (distance)
+        Return signed speed
         """
-
-        u = np.asarray(direction, float)
-        u /= np.linalg.norm(u)
         v = self.velocity_vector(coords)
 
         cond = (v["vx"] < 0) & (v["vy"] > 0)          # upper-left, as in your docstring
@@ -138,8 +134,8 @@ class Trajectory:
         return (np.sqrt(a["vx"]**2 + a["vy"]**2))
 
 
-    def signed_acceleration(self, coords=None, direction=(-1, 1)):
-        return self.instant_velocity(coords, direction).diff() / self.dt
+    def signed_acceleration(self, coords=None):
+        return self.instant_velocity(coords).diff() / self.dt
 
 
     def obj_bodypart_distance(self, bodypart_coords: pd.DataFrame | None = None, obj_coord: list = [0,0]) -> np.array : 

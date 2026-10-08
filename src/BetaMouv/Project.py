@@ -583,12 +583,39 @@ class Project(BaseProject):
         Project name: {self.name}
         Config directory: {self.config_dir}
         ==============================================\n""")
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+        sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
+
+
         
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
 
         bodypart = "finger_3"
+              
+        self.trialgroup.crop_coords(True)
 
-        # self.trialgroup.crop_coords(True)
+        features = [
+                    "area", 
+                    "centroid_direction", 
+                    "centroid_velocity", 
+                    "centroid_speed", 
+                    "centroid_acc", 
+                    "f3_sp_distance", 
+                    "f3_sp_angle", 
+                    "centroid_lever_dist"
+        ]
+
+        for feat in features: 
+            self.trialgroup.plot_tendency_beha_features(
+                                save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
+                                x="relative_t", y=feat)
+        
+        self.trialgroup.plot_tendency_beha_features(
+                            save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),
+                            x="x", y="y") 
+
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
         # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
