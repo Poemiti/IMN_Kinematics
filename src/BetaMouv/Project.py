@@ -204,7 +204,7 @@ class Project(BaseProject):
     def _add_camera_shift(self, trial, update, ctx, save_superimposed: bool = False):
 
         def read_shift_dict(shift_dict): 
-            shift_meta = {"date": trial.date.isoformat(), "subject": trial.subject} 
+            shift_meta = {"date": trial.date.isoformat(), "subject": trial.subject, "view": trial.camera_view} 
             shift = u.match_rule(shift_meta, shift_dict)
             dx, dy = shift["dx"], shift["dy"]
             return dx, dy
@@ -213,7 +213,7 @@ class Project(BaseProject):
             dx, dy = read_shift_dict(self.camera_shift_rules)
 
         else: 
-            tag = f"{trial.subject}_{trial.date.isoformat()}"
+            tag = f"{trial.subject}_{trial.camera_view}_{trial.date.isoformat()}"
             base = u.make_path(ctx["raw_frames_dir"], tag)
             frame_num = 5
             frame_path = f"{base}_{frame_num}.png"
@@ -231,7 +231,7 @@ class Project(BaseProject):
                 dx, dy = dx.round(3).item(), dy.round(3).item()
 
                 ctx["rules"].append({
-                            "when": {"date": trial.date.isoformat(), "subject": trial.subject},
+                            "when": {"date": trial.date.isoformat(), "subject": trial.subject, "view": trial.camera_view},
                             "value": {"dx": dx, "dy": dy},
                         })
 
