@@ -47,12 +47,7 @@ class TrialGroup(BaseTrialGroup):
         self._behavior_features_df = None
 
         self.crop_laser_period = False
-
-
-    def crop_coords(self, bool_val: bool): 
-        self.crop_laser_period = bool_val
-        print("Coordinates cropped from pad_off to end of laser stimulation !")
-
+        self.remove_NOstim = False
 
     def buils_timeseries_df(self, save_as, bodypart: str = "finger_3", init: bool = True):
         if init: 
@@ -123,6 +118,10 @@ class TrialGroup(BaseTrialGroup):
                 if not trial.is_valid() :
                     continue
 
+                if self.remove_NOstim: 
+                    if trial.laser_type == "NOstim": 
+                        continue
+
                 records.append(trial.identity() | {
                     f: getattr(trial, f, None) for f in (metrics or trial.SCALAR_METRIC_FIELDS)
                 })
@@ -146,6 +145,10 @@ class TrialGroup(BaseTrialGroup):
 
                 if not traj.is_valid(): 
                     continue
+
+                if self.remove_NOstim: 
+                    if trial.laser_type == "NOstim": 
+                        continue
 
                 df = traj.clean_coords
 
@@ -175,6 +178,10 @@ class TrialGroup(BaseTrialGroup):
 
                 if trial.behavior is None: 
                     continue
+ 
+                if self.remove_NOstim: 
+                    if trial.laser_type == "NOstim": 
+                        continue
 
                 df = trial.behavior.features
                 traj = trial.trajectories["finger_3"]
@@ -258,9 +265,25 @@ class TrialGroup(BaseTrialGroup):
         print(f"Report saved to: {save_as}")
 
 
-
-    def lineplot_all_traj(self, save_as, bodypart: str = "finger_3"):
+    def lineplot_traj(self, save_as, bodypart: str = "finger_3"): 
         data = self.timeseries_df(bodypart)
+        return self._lineplot_traj(data=data, save_as=save_as,
+                    title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
+
+
+    def lineplot_traj_per_identity(self, save_as, bodypart: str = "finger_3"): 
+        data = self.timeseries_df(bodypart)
+        return self._lineplot_traj_per_indentity(data=data, save_as=save_as,
+                    title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
+
+ 
+    def lineplot_traj_centroid(self, save_as,): 
+        data = self.behavior_features_df()
+        return self._lineplot_traj(data=data, save_as=save_as,
+                    title=f"{self.group_name}\n centroid, n_trial={data['name'].nunique()}")
+
+
+    def _lineplot_traj(self, data, save_as, title: str):
 
         fig, ax = plt.subplots()
 
@@ -301,7 +324,7 @@ class TrialGroup(BaseTrialGroup):
         ax.scatter(x=XL*cm_per_pixel, y=YL*cm_per_pixel, color="k", zorder=1, lw=5)
         ax.hlines(y=YP*cm_per_pixel, xmin=90*cm_per_pixel, xmax=XP*cm_per_pixel, color="k", lw=5)
         
-        plt.title(f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
+        plt.title(title)
         plt.xlabel("x (cm)")
         plt.ylabel("y (cm)")
 
@@ -310,8 +333,7 @@ class TrialGroup(BaseTrialGroup):
         plt.close()
 
 
-    def lineplot_traj_per_indentity(self, save_as, bodypart: str = "finger_3",): 
-        data = self.timeseries_df(bodypart)
+    def _lineplot_traj_per_indentity(data, save_as, title: str): 
 
         def plot_mean(data, **kwargs):
             m = (data
@@ -345,7 +367,7 @@ class TrialGroup(BaseTrialGroup):
         g.map_dataframe(plot_mean)
 
         g.set_titles(col_template="{col_name}", row_template="{row_name}")
-        g.figure.suptitle(f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
+        g.figure.suptitle(title)
         g.set_axis_labels("x (cm)", "y (cm)")
         g.figure.subplots_adjust(top=0.90)
 
@@ -420,7 +442,7 @@ class TrialGroup(BaseTrialGroup):
                                   title=f"{y} - n trials: {len(data.groupby('name'))}",)
 
     def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False): 
-        data = self.self.timeseries_df(bodypart)
+        data = self.timeseries_df(bodypart)
         return self.plot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units,
                                   title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
 

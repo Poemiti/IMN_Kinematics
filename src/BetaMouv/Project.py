@@ -422,14 +422,16 @@ class Project(BaseProject):
                 
                 else:
                     traj.set_success("outlier", success=False, reason=f"out<={MAX_OUTLIER}")
+                    save_as = interpolation_dir / f"interpolation_{bodypart}_{trial.name}.png"
                     
-                    traj.plot_preprocess(
+                    if not save_as.exists():  # plot only if not exist
+                        traj.plot_preprocess(
                                         interpolated_coords=traj.interpolated_coords,
                                         outlier_filtered_coords=outlier_filtered_coords,
                                         raw_coords=raw_coords,
                                         time_pad_off=trial.time_pad_off,
                                         title=f"{trial.group}\nn_out: {n_raw_outliers}|{n_interpolated_outliers} - shift: {trial.camera_shift}",
-                                        save_as=interpolation_dir / f"interpolation_{bodypart}_{trial.name}.png",
+                                        save_as=save_as,
                                     )
                     
                 trial.trajectories[bodypart] = traj
@@ -595,50 +597,49 @@ class Project(BaseProject):
 
 
 
-        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
-        self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
+        # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+        # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
-        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
-                                          subfig_group=None, 
-                                          groups=["subject", "laser_intensity"],
-                                          title=self.trialgroup.group_name)
+        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
+        #                                   subfig_group="subject", 
+        #                                   groups=["laser_type"],
+        #                                   title=self.trialgroup.group_name)
 
-        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-                                          subfig_group="condition", 
-                                          groups=["subject", "laser_type", "laser_intensity"],
-                                          title=self.trialgroup.group_name)
+        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+        #                                   subfig_group="condition", 
+        #                                   groups=["subject", "laser_type", "laser_intensity"],
+        #                                   title=self.trialgroup.group_name)
 
-        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-                                          subfig_group=None, 
-                                          groups=["subject", "is_valid", "reason"],
-                                          title=self.trialgroup.group_name)
+        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+        #                                   subfig_group=None, 
+        #                                   groups=["subject", "is_valid", "reason"],
+        #                                   title=self.trialgroup.group_name)
 
 
         # _________________________________________________________________________________
         ################################# BEHAVIOR ANALYSIS #############################
 
               
-        # self.trialgroup.crop_coords(True)
+        self.trialgroup.crop_laser_period = True
+        self.trialgroup.remove_NOstim = True
 
-        # features = [
-        #             "area", 
-        #             "centroid_direction", 
-        #             "centroid_velocity", 
-        #             "centroid_speed", 
-        #             "centroid_acc", 
-        #             "f3_sp_distance", 
-        #             "f3_sp_angle", 
-        #             "centroid_lever_dist"
-        # ]
+        features = [
+                    "area", 
+                    "centroid_direction", 
+                    "centroid_velocity", 
+                    "centroid_speed", 
+                    "centroid_acc", 
+                    "f3_sp_distance", 
+                    "f3_sp_angle", 
+                    "centroid_lever_dist"
+        ]
 
-        # for feat in features: 
-        #     self.trialgroup.plot_tendency_beha_features(
-        #                         save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
-        #                         x="relative_t", y=feat)
+        for feat in features: 
+            self.trialgroup.plot_tendency_beha_features(
+                                save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
+                                x="relative_t", y=feat)
         
-        # self.trialgroup.plot_tendency_beha_features(
-        #                     save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),
-        #                     x="x", y="y") 
+        self.trialgroup.lineplot_traj_centroid(save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),) 
 
 
 
