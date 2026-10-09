@@ -208,7 +208,7 @@ class Project(BaseProject):
             shift = u.match_rule(shift_meta, shift_dict)
             dx, dy = shift["dx"], shift["dy"]
             return dx, dy
-        
+              
         if update: 
             dx, dy = read_shift_dict(self.camera_shift_rules)
 
@@ -274,7 +274,6 @@ class Project(BaseProject):
             trials_by_group.setdefault(trial.group, []).append(trial)
 
         #  report and decide BEFORE touching the disk 
-
         u._save_error_report(output_dir=u.make_dir(self.paths.data_root / "logs"), 
                              errors=errors, update=update)
 
@@ -296,8 +295,9 @@ class Project(BaseProject):
         shutil.copytree(self.paths.trials_metadata, backup)
         print(f"Backup: {backup}")
 
-        # save camera shift rules
-        u.save(self.config_dir / "rules/camera_shift_rules.yaml",
+        # save camera shift rules when it s not an update
+        if not update:
+            u.save(self.config_dir / "rules/camera_shift_rules.yaml",
                        lambda p: p.write_text(yaml.safe_dump({"rules": ctx["rules"]})),)
 
         # save yaml
