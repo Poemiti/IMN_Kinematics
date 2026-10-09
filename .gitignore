@@ -10,3 +10,5 @@
 
 data/
 logs/
+config/
+.yaml
