@@ -1,8 +1,0 @@
-default: 12.5 # sec
-
-rules:
-  - when:
-      month: 5
-    value: 8.33  # sec
-
-    
