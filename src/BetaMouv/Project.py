@@ -22,7 +22,7 @@ import pandas as pd
 import src.utils as u
 import src.BetaMouv.gui.database_filter as Data_filter
 import src.BetaMouv.gui.preprocess_validator as Validator
-
+import matplotlib.pyplot as plt
 
 # nohup python3 -u main.py > main.out &
 # tail -f main.out 
@@ -398,9 +398,6 @@ class Project(BaseProject):
                 interpolated_outlier_mask = traj.outlier_euclidian_dist_anchored(traj.interpolated_coords, threshold=DIST_THRESH, gap_scale=GAP)
                 n_interpolated_outliers = int(interpolated_outlier_mask.sum())
 
-                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_raw_outliers, "type": "raw"})
-                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_interpolated_outliers, "type": "interpolated"})
-
                 # set outlier stage outcome 
                 if n_raw_outliers == 0 :
                     traj.set_success("outlier", success=True, reason=f"0 out")
@@ -435,6 +432,9 @@ class Project(BaseProject):
                                     )
                     
                 trial.trajectories[bodypart] = traj
+                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_raw_outliers, "type": "raw", "out_succes": traj.stage_outcomes["outlier"].reason})
+                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_interpolated_outliers, "type": "interpolated", "out_succes": traj.stage_outcomes["outlier"].reason})
+
 
         outlier_df = pd.DataFrame(preprocess_records)
         outlier_df.to_csv(preprocess_data_path)
@@ -557,6 +557,12 @@ class Project(BaseProject):
                 behavior = Behavior(coords_set=trial.trajectories,
                                     time_pad_off=trial.time_pad_off, 
                                     cm_per_pixel=trial.cm_per_pixel)
+
+                # fig, ax = plt.subplots(figsize=(6, 6))
+                # behavior.draw_boxes(ax)
+                # ax.plot(behavior.centroid.coords["x"], behavior.centroid.coords["y"], color = "k")
+                # plt.show()
+
                 trial.update(behavior=behavior)
 
             # compute metrics for each trajectories
@@ -568,7 +574,7 @@ class Project(BaseProject):
                 if not traj.is_valid(): 
                     continue
                 
-                traj.clean_coords = traj.compute_instant_metrics()
+                traj.clean_coords = traj.compute_instant_metrics(traj.clean_coords)
                 # TODO
                 # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
 
@@ -620,26 +626,30 @@ class Project(BaseProject):
         ################################# BEHAVIOR ANALYSIS #############################
 
               
-        self.trialgroup.crop_laser_period = True
-        self.trialgroup.remove_NOstim = True
+        # self.trialgroup.crop_laser_period = True
+        # self.trialgroup.remove_NOstim = True
 
-        features = [
-                    "area", 
-                    "centroid_direction", 
-                    "centroid_velocity", 
-                    "centroid_speed", 
-                    "centroid_acc", 
-                    "f3_sp_distance", 
-                    "f3_sp_angle", 
-                    "centroid_lever_dist"
-        ]
+        # features = [
+        #             "area", 
+        #             "centroid_direction", 
+        #             "centroid_velocity", 
+        #             "centroid_speed", 
+        #             "centroid_acc", 
+        #             "f3_sp_distance", 
+        #             "f3_sp_angle", 
+        #             "centroid_lever_dist"
+        # ]
 
-        for feat in features: 
-            self.trialgroup.plot_tendency_beha_features(
-                                save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
-                                x="relative_t", y=feat)
+        # for feat in features: 
+        #     self.trialgroup.plot_tendency_beha_features(
+        #                         save_as=u.make_path(analysis_dir / "behavior" / "with_behavior_span", f"{feat}.png"),
+        #                         x="relative_t", y=feat, show_beha="spatial_behavior")
+            
+        #     self.trialgroup.plot_tendency_beha_features(
+        #                         save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
+        #                         x="relative_t", y=feat, show_beha=None)
         
-        self.trialgroup.lineplot_traj_centroid(save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),) 
+        # self.trialgroup.lineplot_traj_centroid(save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),) 
 
 
 
@@ -651,10 +661,15 @@ class Project(BaseProject):
 
 
         # bodypart = "finger_3"
+        # self.trialgroup.crop_laser_period = True
+        # self.trialgroup.remove_NOstim = True
 
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
-        # self.trialgroup.lineplot_all_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
+        trial = self.trialgroup.trials[1]
+        # behavior_obj = Behavior(trial.trajectories, trial.time_pad_off, trial.cm_per_pixel)
+        # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj_with_beha_zones.svg", Beha=behavior_obj)
+        # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
         # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")
 
         # timeseries_metric = [
@@ -683,12 +698,10 @@ class Project(BaseProject):
 
         ################################# SINGLE TRAJ 
         ################################# Timeseries
-        # TODO Update crop_coords
 
         # i = 0
         # for trial in tqdm(self.trialgroup.trials, desc="plotting timeseries"): 
-        #     i+=1
-        #     if not trial.is_valid() or i%100 != 0: 
+        #     if not trial.is_valid(): 
         #         continue
             
         #     traj: TrajectoryDLC = trial.trajectories.get(bodypart)
@@ -696,17 +709,33 @@ class Project(BaseProject):
         #     if not traj.is_valid(): 
         #         continue
 
-        #     traj.crop_coords(True, time_pad_off=trial.time_pad_off)
+        #     fig, ax = plt.subplots()
 
-        #     fig = traj.show_traj(traj.clean_coords)
-        #     fig.savefig(u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"trajectory.svg"))
+        #     ax = traj.plot_traj(traj.coords, ax, fig, color = "orange", label="raw")
+        #     ax = traj.plot_traj(traj.interpolated_coords, ax, fig, color = "green", label="interpolated")
+        #     ax = traj.plot_traj(traj.clean_coords, ax, fig, color = "blue", label="clean")
 
-        #     for val in timeseries_metric: 
 
-        #         traj.plot_tendency(value=val, time_pad_off=trial.time_pad_off,
-        #                            laser_state=trial.laser_state,
-        #                            group=trial.group,
-        #                            show_angle= val == "angle",
-        #                            save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
+        #     name = trial.name
+        #     title = name[:len(name)//2] + "\n" + name[len(name)//2:]
+
+        #     ax.set(
+        #         title=title,
+        #         xlabel="X position (cm)",
+        #         ylabel="Y position (cm)",
+        #     )
+        #     fig.savefig(u.make_path(analysis_dir / "traj_per_trial" / bodypart, f"{trial.name}.svg"))
+        #     plt.close()
+
+        #     i += 1
+        #     if i > 300 : 
+        #         break
+            # for val in timeseries_metric: 
+
+            #     traj.plot_tendency(value=val, time_pad_off=trial.time_pad_off,
+            #                        laser_state=trial.laser_state,
+            #                        group=trial.group,
+            #                        show_angle= val == "angle",
+            #                        save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
 
     

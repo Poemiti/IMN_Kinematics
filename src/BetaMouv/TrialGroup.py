@@ -30,7 +30,21 @@ LASER_STATE_DASH = {
     "LaserOn" : ""
 }
 
+LASER_STATE_HATCH = {          
+    "LaserOff": "oo",
+    "LaserOn": "",
+}
+
 LASER_PERIOD_COLOR = "royalblue"
+
+BEHAVIOR_PALETTE = {
+    "reach": "yellow", 
+    "open": "orange", 
+    "grasp": "blue", 
+    "press": "green"
+}
+
+
 
 
 class TrialGroup(BaseTrialGroup): 
@@ -265,9 +279,9 @@ class TrialGroup(BaseTrialGroup):
         print(f"Report saved to: {save_as}")
 
 
-    def lineplot_traj(self, save_as, bodypart: str = "finger_3"): 
+    def lineplot_traj(self, save_as, bodypart: str = "finger_3", Beha = None): 
         data = self.timeseries_df(bodypart)
-        return self._lineplot_traj(data=data, save_as=save_as,
+        return self._lineplot_traj(data=data, save_as=save_as, Beha=Beha,
                     title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
 
 
@@ -277,13 +291,13 @@ class TrialGroup(BaseTrialGroup):
                     title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
 
  
-    def lineplot_traj_centroid(self, save_as,): 
+    def lineplot_traj_centroid(self, save_as, Beha = None): 
         data = self.behavior_features_df()
-        return self._lineplot_traj(data=data, save_as=save_as,
+        return self._lineplot_traj(data=data, save_as=save_as, Beha=Beha,
                     title=f"{self.group_name}\n centroid, n_trial={data['name'].nunique()}")
 
 
-    def _lineplot_traj(self, data, save_as, title: str):
+    def _lineplot_traj(self, data, save_as, title: str, Beha = None):
 
         fig, ax = plt.subplots()
 
@@ -323,13 +337,17 @@ class TrialGroup(BaseTrialGroup):
 
         ax.scatter(x=XL*cm_per_pixel, y=YL*cm_per_pixel, color="k", zorder=1, lw=5)
         ax.hlines(y=YP*cm_per_pixel, xmin=90*cm_per_pixel, xmax=XP*cm_per_pixel, color="k", lw=5)
-        
+
+        if Beha is not None: 
+            Beha.draw_boxes(ax)
+            # ax.set_xlim(0, 6)
+            ax.set_ylim(2, 6)
+
         plt.title(title)
         plt.xlabel("x (cm)")
         plt.ylabel("y (cm)")
 
-        plt.savefig(save_as, bbox_inches="tight", dpi=300)
-        plt.show()
+        plt.savefig(save_as)
         plt.close()
 
 
@@ -436,17 +454,18 @@ class TrialGroup(BaseTrialGroup):
 
 
 
-    def plot_tendency_beha_features(self, save_as: str, x="t", y="area", show_units: bool = False): 
+    def plot_tendency_beha_features(self, save_as: str, x="t", y="area", show_units: bool = False, show_beha: str = "spatial_behavior"): 
         data = self.behavior_features_df()
-        return self.plot_tendency(data=data, save_as=save_as, x=x, y=y, show_units=show_units,
+        data.to_csv("data.csv")
+        return self.plot_tendency(data=data, save_as=save_as, x=x, y=y, show_units=show_units, show_beha=show_beha,
                                   title=f"{y} - n trials: {len(data.groupby('name'))}",)
 
-    def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False): 
+    def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False, show_beha: str = "spatial_behavior"): 
         data = self.timeseries_df(bodypart)
-        return self.plot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units,
+        return self.plot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units, show_beha=show_beha,
                                   title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
 
-    def plot_tendency(self, data, title, save_as: str, x="t", y="area", show_units: bool = False):
+    def plot_tendency(self, data, title, save_as: str, x="t", y="area", show_units: bool = False, show_beha: str="spatial_behavior"):
 
 
         g = sns.FacetGrid(
@@ -476,17 +495,97 @@ class TrialGroup(BaseTrialGroup):
                 alpha=0.3, estimator=None, sort=None,
             )
 
-        g.add_legend()
+        if show_beha: 
+            self.draw_behavior_proportion(data, x, g, show_beha)
 
+        self.add_trial_count_to_facet(data, g, hue_colors=LASER_STATE_PALETTE)
+
+        g.add_legend()
         g.set_titles(col_template="{col_name}", row_template="{row_name}")
         g.set_axis_labels(x, y)
         g.figure.suptitle(title,  ha='center')
-        g.figure.subplots_adjust(top=0.8)
+        g.figure.subplots_adjust(top=0.9)
 
         g.savefig(save_as)
         
-        plt.show()
         plt.close()
+
+
+
+    def draw_behavior_proportion(self, data, x, g, behavior="spatial_behavior",
+                                hue="laser_state"):
+        facet_cols = ["laser_type", "laser_intensity"]   # col, row
+        group_cols = facet_cols + [hue]                  # one dominant-behavior track per group
+        keys = group_cols + [x]
+
+        # 1-3. proportions, now per laser_state as well
+        counts = (data.groupby(keys + [behavior])["name"].nunique()
+                    .rename("n_trials").reset_index())
+        totals = (data.groupby(keys)["name"].nunique()
+                    .rename("total_trials").reset_index())
+        props = counts.merge(totals, on=keys)
+        props["proportion"] = props["n_trials"] / props["total_trials"]
+
+        # 4. dominant behavior (deterministic on ties)
+        props: pd.DataFrame = props.sort_values(keys + [behavior])
+        dominant: pd.DataFrame = (props.loc[props.groupby(keys)["proportion"].idxmax()]
+                        .sort_values(keys)
+                        .reset_index(drop=True))
+
+        # 5. runs of identical behavior, never crossing a group boundary
+        prev: pd.DataFrame = dominant.groupby(group_cols)[behavior].shift()
+        dominant["segment"] = dominant[behavior].ne(prev).cumsum()
+
+        step = dominant.groupby(group_cols)[x].diff().median()
+        nxt = dominant.groupby(group_cols)[x].shift(-1)
+        dominant["x_end"] = nxt.fillna(dominant[x] + step)
+
+        spans = (dominant.groupby("segment")
+                        .agg(laser_type=("laser_type", "first"),
+                            laser_intensity=("laser_intensity", "first"),
+                            state=(hue, "first"),
+                            beh=(behavior, "first"),
+                            start=(x, "min"),
+                            end=("x_end", "max"))
+                        .reset_index())
+
+        # 6. one band per hue level inside each facet
+        # hue_levels = list(g.hue_names)                   # same order as the legend
+        hue_levels = ["LaserOff", "LaserOn"]
+        n = len(hue_levels)
+        for row in spans.itertuples():
+            ax = g.axes_dict[(row.laser_intensity, row.laser_type)]   # (row_name, col_name)
+            i = hue_levels.index(row.state)
+            ax.axvspan(row.start, row.end,
+                    ymin=i / n, ymax=(i + 1) / n,     # axes fractions
+                    color=BEHAVIOR_PALETTE.get(row.beh, "gray"),
+                    hatch=LASER_STATE_HATCH.get(row.state, ""),
+                    alpha=0.15, zorder=0, lw=0)
+
+
+
+    def add_trial_count_to_facet(self, data, g, hue="laser_state", hue_colors=None,
+                            row_col="laser_intensity", col_col="laser_type", loc=(0.90, 0.81), fontsize=12):
+        """Write 'n = X' on each facet, one line per hue level."""
+        
+        counts = (data.groupby([row_col, col_col, hue])["name"]
+                    .nunique().rename("n").reset_index())
+
+        hue_levels = sorted(data[hue].unique())
+        hue_colors = hue_colors or {}
+
+        for (row_name, col_name), ax in g.axes_dict.items():   # keys are (row, col)
+            sub = counts[(counts[row_col] == row_name) & (counts[col_col] == col_name)]
+            
+            for i, level in enumerate(hue_levels):
+
+                n = int(sub.loc[sub[hue] == level, "n"].sum())
+                ax.text(loc[0], loc[1] - i * 0.08,
+                        f"n = {n}",
+                        transform=ax.transAxes, ha="left", va="top",
+                        fontsize=fontsize, color=hue_colors.get(level, "black"),
+                        bbox=dict(facecolor="white", edgecolor="none", alpha=0.6, pad=1.5),
+                        zorder=5)
 
 
 
