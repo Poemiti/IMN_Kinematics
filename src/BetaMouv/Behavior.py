@@ -29,14 +29,13 @@ class Behavior:
         self.cm_per_pixel = cm_per_pixel
 
         finger3_traj: TrajectoryDLC = self.coords_set["finger_3"]
-        self.reach_bottom = finger3_traj.clean_coords.loc[finger3_traj.clean_coords["t"] == self.time_pad_off]["y"]
+        self.reach_bottom = finger3_traj.clean_coords.loc[finger3_traj.clean_coords["t"] == self.time_pad_off, "y"].item()
 
         # constants in cm and cartesian plane
         self.LEVER_POS = finger3_traj._point_to_scaled_cartesian(cfg["lever_position"][0], cfg["lever_position"][1])
         self.PAD_POS = finger3_traj._point_to_scaled_cartesian(cfg["pad_position"][0], cfg["pad_position"][0])
         self.FRAME_WIDTH_CM =  cfg["frame_width_px"] * self.cm_per_pixel
         self.FRAME_HEIGHT_CM =  cfg["frame_height_px"] * self.cm_per_pixel
-
 
         # features building
         self.centroid = Trajectory(self.compute_centroid())
@@ -49,6 +48,43 @@ class Behavior:
         self.features["f3_sp_distance"] = self.bodypart_distance()
         self.features["f3_sp_angle"] = self.bodypart_angle()
         self.features["centroid_lever_dist"] = self.centroid.obj_bodypart_distance(obj_coord=self.LEVER_POS)
+
+        # spatial zones based on centroid position 
+        self.lever_right = 40 * self.cm_per_pixel
+        self.lever_upper = 10 * self.cm_per_pixel
+        self.lever_lower = 15 * self.cm_per_pixel
+        self.spatial_boxes = {
+                "reach": (
+                    self.LEVER_POS[0] + self.lever_right,
+                    self.FRAME_WIDTH_CM,
+                    self.PAD_POS[0],
+                    self.reach_bottom,
+                    "yellow"
+                ),
+                "open": (
+                    0,
+                    self.FRAME_WIDTH_CM,
+                    self.LEVER_POS[0] + self.lever_right,
+                    self.LEVER_POS[1] + self.lever_upper,
+                    "orange"
+                ),
+                "grasp": (
+                    0,
+                    self.LEVER_POS[1] + self.lever_upper,
+                    self.LEVER_POS[0] + self.lever_right,
+                    self.LEVER_POS[1] - self.lever_lower,
+                    "blue"
+                ),
+                "press": (
+                    0,
+                    self.LEVER_POS[1] - self.lever_lower,
+                    self.LEVER_POS[0] + self.lever_right,
+                    self.LEVER_POS[1] - (self.lever_lower * 2.5),
+                    "green"
+                ),
+            }
+        
+        self.features["spatial_behavior"] = self.classify_spatial_trajectory(self.centroid.coords)
 
 
     def bodypart_angle(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
@@ -96,8 +132,8 @@ class Behavior:
         bodypart2 = coords_set[bp2].clean_coords
         bodypart3 = coords_set[bp3].clean_coords
 
-        centroid_x = bodypart1["x"] + bodypart2["x"] + bodypart3["x"] / 3
-        centroid_y = bodypart1["y"] + bodypart2["y"] + bodypart3["y"] / 3
+        centroid_x = (bodypart1["x"] + bodypart2["x"] + bodypart3["x"]) / 3
+        centroid_y = (bodypart1["y"] + bodypart2["y"] + bodypart3["y"]) / 3
 
         return pd.DataFrame({
             "x": centroid_x, 
@@ -144,3 +180,51 @@ class Behavior:
     #     ax[1].set_xlabel("angle")
     #     plt.savefig(f"./data/BetaMouv/results/CONTRA_CHR_#517_#531/behavior_box_testing/{self.name}.png")
     #     plt.close()
+
+
+    ########################  methods for spatial classification  ######################""
+
+    def _contains(self, name: str, x: float, y: float) -> bool: 
+        """Return if the coordinates are in the boxe"""
+        xmin, ymin, xmax, ymax, _ = self.spatial_boxes[name]
+        return xmin <= x <= xmax and ymax <= y <= ymin
+        
+
+    def classify_spatial_behavior(self, x: float, y: float) -> str:
+        behavior = "none"
+        for name in self.spatial_boxes:
+            if self._contains(name, x, y):
+                behavior = name
+
+        return behavior
+    
+    def classify_spatial_trajectory(self, coords: pd.DataFrame) -> pd.DataFrame :
+        labels = []
+
+        for i, row in enumerate(coords.itertuples(index=False)):
+            x, y, t = row.x, row.y, row.t
+            labels.append(self.classify_spatial_behavior(x, y))
+
+        return labels
+
+    def draw_boxes(self, ax) :
+        from matplotlib.patches import Rectangle
+        for box_name, coords in self.spatial_boxes.items() :
+            xmin, ymin, xmax, ymax, color = coords 
+
+            rect = Rectangle(
+                (xmin, ymin),
+                xmax - xmin,
+                ymax - ymin,
+                facecolor=color,
+                edgecolor=None,
+                lw=1,
+                alpha=0.3,
+                label=box_name,
+            )
+            ax.add_patch(rect)
+
+        ax.scatter(self.LEVER_POS[0],self.LEVER_POS[1], color = "red")
+
+
+    
