@@ -20,44 +20,19 @@ class Trajectory:
     # ------------- plotting function ------------    
 
     def plot_traj(self, coords: pd.DataFrame, ax: plt.axes, fig, 
-                  color: str = "k", show_time: bool= False) -> plt.axes: 
+                  color: str = "k", show_time: bool= False, label: str = None) -> plt.axes: 
         
         ax.plot(coords["x"], coords["y"], color=color)
         sc = ax.scatter(coords["x"], coords["y"], 
                         c=coords["t"] if show_time else color, 
-                        cmap="viridis" if show_time else None)
+                        cmap="viridis" if show_time else None, 
+                        label=label)
         
         if show_time: 
             cbar = fig.colorbar(sc, ax=ax)
             cbar.set_label("t")
 
         return ax
-
-
-    def show_traj(self, coords: pd.DataFrame, show: bool=False):
-        if coords is None:
-            coords = self.coords.copy()
-
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        ax = self.plot_traj(coords, ax, fig)
-
-        name = self.file.name.replace("pred_results_", "")
-        title = name[:len(name)//2] + "\n" + name[len(name)//2:]
-
-        ax.set(
-            # xlim=(0, self.frame_height * self.cm_per_pixel),
-            # ylim=(0, self.frame_height * self.cm_per_pixel),
-            title=title,
-            xlabel="X position (cm)",
-            ylabel="Y position (cm)",
-        )
-
-        if show: 
-            plt.show()
-        plt.close()
-
-        return fig
 
 
     ############## Compute some metrics ###################
@@ -300,3 +275,36 @@ class TrajectoryDLC(Trajectory):
         clean_df = df.iloc[1:].reset_index(drop=True)
 
         return clean_df
+
+
+
+    #####################"" plotting ###################
+
+
+    def show_traj(self, coords: pd.DataFrame, show: bool=False, crop_coords: bool=True):
+        if coords is None:
+            coords = self.coords.copy()
+
+        if crop_coords: 
+            coords = self.crop_xy(coords, self.time_pad_off - 0.1, self.time_pad_off + 0.4)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+
+        ax = self.plot_traj(coords, ax, fig)
+
+        name = self.file.name.replace("pred_results_", "")
+        title = name[:len(name)//2] + "\n" + name[len(name)//2:]
+
+        ax.set(
+            # xlim=(0, self.frame_height * self.cm_per_pixel),
+            # ylim=(0, self.frame_height * self.cm_per_pixel),
+            title=title,
+            xlabel="X position (cm)",
+            ylabel="Y position (cm)",
+        )
+
+        if show: 
+            plt.show()
+        plt.close()
+
+        return fig
