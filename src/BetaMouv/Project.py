@@ -335,16 +335,15 @@ class Project(BaseProject):
             if not trial.is_valid(): 
                 continue
 
-            if "FIBER_BROKEN" in trial.name:        # for the rat 521
-                print("FIBER_BROKEN, skipped")
-                continue
+            output_path = trial.clip_path.parent / f"pred_results_{trial.name}.csv"
 
+            if output_path.exists(): 
+                print(f"{output_path} already exist, prediction skipped!")
+                continue 
 
             # prediction 
             trial.dlc_predict(model_path=self.paths.model,
-                              output_csv_path=trial.clip_path.parent / f"pred_results_{trial.stem}.csv")
-
-            break
+                              output_csv_path=output_path)
 
         
             
@@ -603,23 +602,23 @@ class Project(BaseProject):
 
 
 
-        # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
         # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
-        #                                   subfig_group="subject", 
-        #                                   groups=["laser_type"],
-        #                                   title=self.trialgroup.group_name)
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
+                                          subfig_group="subject", 
+                                          groups=["laser_type"],
+                                          title=self.trialgroup.group_name)
 
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-        #                                   subfig_group="condition", 
-        #                                   groups=["subject", "laser_type", "laser_intensity"],
-        #                                   title=self.trialgroup.group_name)
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+                                          subfig_group="condition", 
+                                          groups=["subject", "laser_type", "laser_intensity"],
+                                          title=self.trialgroup.group_name)
 
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-        #                                   subfig_group=None, 
-        #                                   groups=["subject", "is_valid", "reason"],
-        #                                   title=self.trialgroup.group_name)
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+                                          subfig_group=None, 
+                                          groups=["subject", "is_valid", "failing_step"],
+                                          title=self.trialgroup.group_name)
 
 
         # _________________________________________________________________________________
@@ -666,7 +665,7 @@ class Project(BaseProject):
 
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
-        trial = self.trialgroup.trials[1]
+        # trial = self.trialgroup.trials[1]
         # behavior_obj = Behavior(trial.trajectories, trial.time_pad_off, trial.cm_per_pixel)
         # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj_with_beha_zones.svg", Beha=behavior_obj)
         # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
