@@ -2,8 +2,11 @@
 
 
 from src.Base.TrialGroup import TrialGroup as BaseTrialGroup
+from src.BetaMouv.Statistics import Statistics
+
 from .Trial import Trial
 from .Trajectory import TrajectoryDLC
+from statannotations.Annotator import Annotator
 
 import pandas as pd
 import seaborn as sns
@@ -41,8 +44,17 @@ BEHAVIOR_PALETTE = {
     "reach": "yellow", 
     "open": "orange", 
     "grasp": "blue", 
-    "press": "green"
+    "press": "green",
+    "none": "gray"
 }
+
+LASER_INTENSITY_PALETTE = {"low" : "lightblue",
+                            "high" : "salmon",
+                            "NOstim" : "gray"}
+
+LASER_INTENSITY_PALETTE_DARK = {"low" : "steelblue",
+                            "high" : "tomato",
+                            "NOstim" : "black"}
 
 
 
@@ -63,7 +75,7 @@ class TrialGroup(BaseTrialGroup):
         self.crop_laser_period = False
         self.remove_NOstim = False
 
-    def buils_timeseries_df(self, save_as, bodypart: str = "finger_3", init: bool = True):
+    def buils_timeseries_df(self, save_as, bodypart: str = "finger_3", init: bool = True) -> pd.DataFrame:
         if init: 
             self._timeseries_df = self.timeseries_df(bodypart)
             self._timeseries_df.to_csv(save_as)
@@ -122,23 +134,26 @@ class TrialGroup(BaseTrialGroup):
         return self._bodypart_success_df
 
 
-    def scalar_df(self, metrics: list[str] = None) -> pd.DataFrame:
+    def scalar_df(self, bodypart: str = "finger_3") -> pd.DataFrame:
         """One row per trial — for distributions/scatter (avg velocity, tortuosity, ...)."""
 
         if self._scalar_df is None:
             records = []
 
-            for trial in self.trials:
-                if not trial.is_valid() :
+            for trial in tqdm(self.trials, desc="Building scalar_df"):
+                if not trial.is_valid() or trial.laser_intensity == "incompatible":
+                    continue
+
+                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
+
+                if not traj.is_valid(): 
                     continue
 
                 if self.remove_NOstim: 
                     if trial.laser_type == "NOstim": 
                         continue
 
-                records.append(trial.identity() | {
-                    f: getattr(trial, f, None) for f in (metrics or trial.SCALAR_METRIC_FIELDS)
-                })
+                records.append(trial.identity() | traj.scalar_metrics)
 
             self._scalar_df = pd.DataFrame(records)
 
@@ -182,7 +197,7 @@ class TrialGroup(BaseTrialGroup):
         return self._timeseries_df
 
 
-    def behavior_features_df(self): 
+    def behavior_features_df(self) -> pd.DataFrame: 
         if self._behavior_features_df is None:
             frames = []
 
@@ -682,3 +697,200 @@ class TrialGroup(BaseTrialGroup):
 
         fig.write_html(str(save_as.with_suffix(".html")))
         fig.show()
+
+
+    def distri_feat_per_behavior(self, save_as,
+                                laser_type: str = None, laser_intensity: str = None, laser_state: str = None, 
+                                features_list: list =  ["x", "y", "area"]) : 
+
+        data = self.behavior_features_df()
+        data = data.loc([data["laser_type"] == laser_type] & 
+                data["laser_intensity"] == laser_intensity &
+                data["laser_type"] == laser_type)
+
+        title = f"{laser_type}, {laser_intensity}, {laser_state} - n_trial={data['name'].nunique()}"
+
+        # Wide -> long: one row per (t, trial, behavior, feature)
+        data_long = data.melt(
+            id_vars=["t", "spatial_behavior", "name"],
+            value_vars=features_list,
+            var_name="feature",
+            value_name="value",
+        )
+
+        g = sns.FacetGrid(
+            data_long,
+            row="feature",
+            col="spatial_behavior",
+            hue="spatial_behavior",
+            palette=BEHAVIOR_PALETTE,
+            sharex=False,   # each feature has its own scale
+            sharey=False,   # densities differ between features
+            margin_titles=True,
+            height=2.2,
+            aspect=1.2,
+        )
+
+        g.map(sns.histplot, "value", stat="probability", bins=30)
+        # g.map(sns.kdeplot, "value", fill=True)
+
+        g.set_axis_labels("value", "proba")
+        g.set_titles(row_template="{row_name}", col_template="{col_name}")
+        for text in g._margin_titles_texts:
+            text.set_rotation(45)
+        g.figure.suptitle(title,  ha='center')
+        g.figure.subplots_adjust(top=0.9, right=0.9)
+
+        g.savefig(save_as)
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+
+
+    def _trim_extremes_iqr(self, df, value_col="value", group_cols=("laser_cond", "laser_intensity"), k=1.5):
+        """For distribution plot : remove extreme values with the interquarile range method (IQR)"""
+        def _trim(group):
+            q1 = group[value_col].quantile(0.25)
+            q3 = group[value_col].quantile(0.75)
+            iqr = q3 - q1
+            low = q1 - k * iqr
+            high = q3 + k * iqr
+            return group[(group[value_col] >= low) & (group[value_col] <= high)]
+
+        return (df.groupby(list(group_cols), group_keys=False)
+            .apply(_trim, include_groups=True)
+            .reset_index(drop=True)
+        )
+
+
+    def _add_stat_annotations(self, ax, data, metric, statistics, order):
+
+        def parse_group(g):
+            cond, intensity = g.split(".")
+            return (cond, intensity)
+        
+        # Build pairs list
+        pairs = [
+            (parse_group(row["group1"]),
+            parse_group(row["group2"]))
+            for _, row in statistics.iterrows()
+        ]
+        print(pairs)
+
+        if len(pairs) == 0:
+            return
+
+        annotator = Annotator(
+                ax,
+                pairs,
+                data=data,
+                x="laser_cond",
+                y=metric,
+                hue="laser_intensity",
+                order=order,
+                hue_order=["low", "high"]
+            )
+
+        # We already computed p-values = no test
+        annotator.configure(test=None, text_format="star",   # or "simple"
+                            loc="inside", verbose=0)
+
+        # Use adjusted p-values
+        pvalues = statistics["p_adj"].values
+
+        annotator.set_pvalues(pvalues)
+        annotator.annotate()
+
+
+
+
+    def violin_statistic(self, comparisons, metric: str, save_as: Path, bodypart: str = "finger_3", strip: bool = True,
+                            order: list[str] = ["Conti_LaserOff", "Beta_LaserOff", "Conti_LaserOn", "Beta_LaserOn"], 
+                            merge_Off: bool = False) : 
+
+        data = self.scalar_df(bodypart)
+        if merge_Off: 
+            data["laser_cond"] = np.where(data["laser_state"] == "LaserOff", data["laser_state"], data["laser_type"])        
+        else : 
+            data["laser_cond"] = data["laser_type"] + "_" + data["laser_state"]
+
+
+        # compute statistics
+        Stat = Statistics(data=data, metric=metric)
+        stat_res = Stat.compute_statistics(comparisons)
+
+        kruskal_significant = "mann_whitney" in stat_res.keys()
+
+        if kruskal_significant: 
+            pairwise_results = stat_res["mann_whitney"]
+            significant_pair = pairwise_results[pairwise_results["p_value"] < 0.05] 
+
+        data_trimmed = self._trim_extremes_iqr(data, value_col=metric, k=1.5)
+        print(f"\nNumber of removed outliers : {len(data) - len(data_trimmed)}")
+
+        fig, ax = plt.subplots(figsize=[15,9]) #figsize=[10,5]
+
+        sns.violinplot(
+            data=data_trimmed,
+            x="laser_cond",
+            y=metric,
+            hue="laser_intensity",
+            split=True,
+            inner="quart",
+            order=order, hue_order=["low", "high"],
+            gap= .1,
+            palette=LASER_INTENSITY_PALETTE,
+        )
+
+        print("strip=", strip)
+        if strip : 
+            sns.stripplot(
+                data=data_trimmed,
+                x="laser_cond",
+                y=metric,
+                hue="laser_intensity", hue_order=["low", "high"],
+                marker="X",
+                size=3, legend=False,
+                alpha=0.7,
+                palette=LASER_INTENSITY_PALETTE_DARK,
+                dodge=True,  # to split like the violin
+            )
+
+        # --------------------------- display counting --------------------------
+
+        count = (data
+                .groupby(["laser_cond", "laser_intensity"])
+                .size()
+                .reset_index(name="N")
+                )
+        
+        # Get category positions
+        x_positions = {cond: i for i, cond in enumerate(order)}
+
+        # Small horizontal offset for split violins
+        offset = 0.15
+        ymin = data_trimmed[metric].min()
+
+        for _, row in count.iterrows():
+            cond = row["laser_cond"]
+            intensity = row["laser_intensity"]
+            N = row["N"]
+
+            x = x_positions[cond]
+
+            ax.text(
+                x+offset if intensity == "high" else x-offset,
+                ymin,
+                f"{N}",
+                ha="center",
+                va="bottom",
+                color="steelblue" if intensity=="low" else "tomato",
+                fontsize=10,
+                fontweight="bold"
+            )
+
+        if kruskal_significant:
+            self._add_stat_annotations(ax, data_trimmed, metric, significant_pair, order)
+
+        fig.suptitle(f"{metric} distribution - n trial = {len(data)}")
+        fig.savefig(save_as)

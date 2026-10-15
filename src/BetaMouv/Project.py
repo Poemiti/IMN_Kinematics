@@ -550,6 +550,10 @@ class Project(BaseProject):
             if not trial.is_valid():    
                 continue
 
+            # video = Video(trial.clip_path)
+            # video.annotate_video(output_path=self.paths.data_root / "annotated_vid" / f"{trial.name}.mp4")
+            # video.extract_frames(frame_range=range(video.frame_count), output_base=self.paths.data_root / "annotated_vid" / "frame", video_path=self.paths.data_root / "annotated_vid" / f"{trial.name}.mp4")
+
             # compute behavior state
 
             if all(traj.is_valid() for traj in trial.trajectories.values()): 
@@ -575,8 +579,7 @@ class Project(BaseProject):
                     continue
                 
                 traj.clean_coords = traj.compute_instant_metrics(traj.clean_coords)
-                # TODO
-                # compute scalar metrics that will then be added to SCALAR_FIELD in Trial
+                traj.scalar_metrics = traj.compute_scalar_metrics(traj.clean_coords)
 
         self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
                                             step="metrics")
@@ -651,6 +654,9 @@ class Project(BaseProject):
         
         # self.trialgroup.lineplot_traj_centroid(save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),) 
 
+        # self.trialgroup.distri_feat_per_behavior(laser_type="Beta", laser_intensity="low", 
+        #                                          save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", "all_trial.svg"),
+        #                                          features_list=features)
 
 
         # _________________________________________________________________________________
@@ -660,14 +666,13 @@ class Project(BaseProject):
         ################################# Timeseries
 
 
-        # bodypart = "finger_3"
-        # self.trialgroup.crop_laser_period = True
-        # self.trialgroup.remove_NOstim = True
+        bodypart = "finger_3"
+        self.trialgroup.crop_laser_period = True
+        self.trialgroup.remove_NOstim = True
 
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
-        trial = self.trialgroup.trials[1]
-        # behavior_obj = Behavior(trial.trajectories, trial.time_pad_off, trial.cm_per_pixel)
+        # trial = self.trialgroup.trials[1]
         # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj_with_beha_zones.svg", Beha=behavior_obj)
         # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
         # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")
@@ -693,7 +698,59 @@ class Project(BaseProject):
         ################################# ALL TRAJ
         ################################# Scalar series
 
-        # ....
+        comparisons = [
+            # Conti vs Beta
+            ("Conti_LaserOff.low",  "Beta_LaserOff.low"),
+            ("Conti_LaserOff.high", "Beta_LaserOff.high"),
+            ("Conti_LaserOn.low",   "Beta_LaserOn.low"),
+            ("Conti_LaserOn.high",  "Beta_LaserOn.high"),
+
+            # Off vs On
+            ("Conti_LaserOff.low",  "Conti_LaserOn.low"),
+            ("Conti_LaserOff.high", "Conti_LaserOn.high"),
+            ("Beta_LaserOff.low",   "Beta_LaserOn.low"),
+            ("Beta_LaserOff.high",  "Beta_LaserOn.high"),
+
+            # low vs high
+            ("Beta_LaserOff.low",   "Beta_LaserOff.high"),
+            ("Beta_LaserOn.low",    "Beta_LaserOn.high"),
+            ("Conti_LaserOff.low",  "Conti_LaserOff.high"),
+            ("Conti_LaserOn.low",   "Conti_LaserOn.high"),
+        ]
+
+        comparisons_merge_Off = [
+            # conti vs beta
+            ("Conti.low",  "Beta.low"),
+            ("Conti.high", "Beta.high"),
+
+            # low vs high
+            ("LaserOff.high", "Conti.high"),
+            ("LaserOff.high",  "Beta.high"),
+            ("LaserOff.low",    "Beta.low"),
+            ("LaserOff.low",   "Conti.low"),
+
+            # condition high vs condition low
+            ("Conti.low", "Conti.high"),
+            ("Beta.low",  "Beta.high"),
+
+            # Beta high ON vs Conti low ON 
+            # (because conti low is suppose to be as damagefull as the beta high)
+            ("Beta.high", "Conti.low"),
+            ("Beta.low", "Conti.high")
+        ]
+
+        metrics = [
+            "avg_velocity_laser_period", 
+            "tortuosity_laser_period", 
+            "tortuosity_pad_to_lever", 
+        ]
+
+        for metric in metrics: 
+            self.trialgroup.violin_statistic(comparisons, metric=metric, 
+                                             save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}.svg"))
+            self.trialgroup.violin_statistic(comparisons_merge_Off, metric=metric,  merge_Off=True,
+                                             save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}_merged_off.svg"),
+                                             order=["LaserOff", "Conti", "Beta"])
 
 
         ################################# SINGLE TRAJ 

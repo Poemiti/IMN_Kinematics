@@ -40,6 +40,7 @@ class TrajectoryDLC(BaseTrajectory):
 
         self.interpolated_coords = None
         self.clean_coords = None
+        self.scalar_metrics = None
 
         # some constants from cfg
         self.dt = 1 / cfg["fps"]
@@ -64,6 +65,18 @@ class TrajectoryDLC(BaseTrajectory):
         coords["signed_acc"] = self.signed_acceleration(coords)
 
         return coords
+
+
+    def compute_scalar_metrics(self, coords: pd.DataFrame | None = None) -> pd.DataFrame: 
+        if coords is None:
+            coords = self.coords
+        
+        scalar_metrics = {}
+        scalar_metrics["avg_velocity_laser_period"] = self.avg_velocity(coords, start=self.time_pad_off, end=self.time_pad_off + 0.325)
+        scalar_metrics["tortuosity_laser_period"] = self.tortuosity_fixed_period(coords, start=self.time_pad_off, end=self.time_pad_off + 0.325)
+        scalar_metrics["tortuosity_pad_to_lever"] = self.tortuosity_from_obj(coords, obj_coords=self.LEVER_POS, time_pad_off=self.time_pad_off)
+
+        return scalar_metrics
 
 
 

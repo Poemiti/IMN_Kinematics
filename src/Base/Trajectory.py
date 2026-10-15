@@ -132,6 +132,98 @@ class Trajectory:
         return np.degrees(np.arctan2(dy, -dx))
 
 
+    ############## Compute averaging metrics ###################
+
+
+    def net_displacement(self, coords: pd.DataFrame | None = None) -> float:
+        """Straight-line distance from start to end."""
+        if coords is None:
+            coords = self.coords
+
+        start = coords[["x", "y"]].iloc[0]
+        end = coords[["x", "y"]].iloc[-1]
+
+        return np.linalg.norm(end - start)
+
+
+    def path_length(self, coords: pd.DataFrame | None = None) -> float:
+        """Total traveled distance (path length). Sum of distance between each points"""
+        if coords is None:
+            coords = self.coords
+
+        dist = self.distances(coords)
+        return dist.sum()
+
+    
+
+    def _get_lever_reaching_time(self, coords: pd.DataFrame, lever_pos: tuple[int, int]) -> float: 
+        """Return the time at which the coordinates where as close 
+        a possible to the lever position"""
+
+        lever_x, lever_y = lever_pos
+
+        # measure distance between coords and lever
+        distances = np.sqrt(
+            (coords["x"] - lever_x) ** 2 +
+            (coords["y"] - lever_y) ** 2
+        )
+
+        # return the time at which the distance was the smallest 
+        return coords.loc[distances.idxmin(), "t"]
+    
+
+    def tortuosity_from_obj(self, coords, obj_coords, time_pad_off):
+        """Path length to get to the lever / straight-line distance from pad off to lever.""" 
+        # crop at pad off to skip beginning
+        pad_off_coords = coords.loc[coords["t"] >= time_pad_off].reset_index(drop=True)
+
+        # crop coordinates from the pad off to the lever reach
+        time_reach_lever =  self._get_lever_reaching_time(pad_off_coords, obj_coords)
+        cropped_coords = pad_off_coords.loc[coords["t"] <= time_reach_lever].reset_index(drop=True)
+        
+        direct = self.net_displacement(cropped_coords)
+
+        return self.path_length(cropped_coords) / direct
+    
+
+    def tortuosity_fixed_period(self, coords: pd.DataFrame | None = None, 
+                   lever_pos: tuple[int, int] = [0, 0],
+                   start = None, end = None) -> float:
+        """Torutosity for the fixed time period. 
+        Path lenght during the time period / straight line distance from pad off to lever pos"""
+        if coords is None:
+            coords = self.coords
+
+        cropped_coords = self.crop_xy(coords, start, end)
+
+        # calculated straigth distance between pad off and lever position
+        dist = lever_pos - cropped_coords[["x", "y"]].iloc[0]
+        direct = np.linalg.norm(dist)
+
+        return self.path_length(cropped_coords) / direct
+
+
+    def duration(self, coords: pd.DataFrame | None = None) -> float:
+        """Return duration in sec of the dataframe coords"""
+        if coords is None:
+            coords = self.coords
+        return coords["t"].iloc[-1] - coords["t"].iloc[0]
+
+
+    def avg_velocity(self, coords, start, end): 
+        """Path length to get to the lever / straight-line distance from pad off to lever."""
+        if coords is None:
+            coords = self.coords
+
+        cropped_coords = self.crop_xy(coords, start, end)
+
+        return self.path_length(cropped_coords) / self.duration(cropped_coords)
+
+
+        
+
+
+
 
 
 

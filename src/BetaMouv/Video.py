@@ -126,7 +126,7 @@ class Video(BaseVideo):
                        video_path: Path=None, 
                        csv_path: Path=None, 
                        radius=5, 
-                       likelihood_threshold=0.8, 
+                       likelihood_threshold=0, 
                        skeleton_path=None):
         """
         Annotate a video with pose estimation data stored in csv.
