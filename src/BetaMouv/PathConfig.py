@@ -12,8 +12,8 @@ class PathConfig:
     subject_name: str | None = None
 
     # Input data
-    model: Path = Path("/media/filer2/T4b/UserFolders/Poemiti/Reaching-DLC-model-main/data/model/DLC-Poe-2026-03-27/")
-    raw_videos: Path = Path("/media/filer2/T4b/UserFolders/Raphael/Raphael_M2_2024/Opto_SkilledReaching_2024_experiments/MOVIES/")
+    model: Path = None
+    raw_videos: Path = None
 
     # Output folders
     @property

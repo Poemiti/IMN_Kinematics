@@ -8,6 +8,12 @@ from src.BetaMouv.Trajectory import TrajectoryDLC
 
 import src.utils as u
 
+import matplotlib.pyplot as plt
+import seaborn as sns
+custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
+
+
 # load project_info.yaml to get constant related to the protocole
 cfg = u.load_config("./config/BetaMouv/project_info.yaml")
 
@@ -227,4 +233,321 @@ class Behavior:
         ax.scatter(self.LEVER_POS[0],self.LEVER_POS[1], color = "red")
 
 
+
+
+## function for behavior clustering
+
+
+
+def HMM(data: pd.DataFrame, feature_cols: list[str], n_state: int) -> pd.DataFrame:
+    """Run HMM on data (must only contain qualitative data) with n_state
+    Returns the same data dataframe, with the column 'pred_state' containing the n states 
+    predicted by the model""" 
+
+    from hmmlearn.hmm import GaussianHMM
+    from sklearn.preprocessing import StandardScaler
+
+    X = StandardScaler().fit_transform(data[feature_cols].to_numpy())
+    lengths = data.groupby("id", sort=True).size().to_numpy()   # frames per trial
+    assert lengths.sum() == len(X)
+
+    # several random starts, keep the best (EM finds local optima)
+    best, best_score = None, -np.inf
+    for seed in range(5):
+        m = GaussianHMM(n_components=n_state, covariance_type="diag",
+                        n_iter=200, random_state=seed)
+        m.fit(X, lengths)
+        score = m.score(X, lengths)
+
+        print(f"    seed: {seed}   score: {score}")
+        if score > best_score:
+            best, best_score = m, score
+    model = best
+
+    data["pred_state"] = model.predict(X, lengths)
+    print(np.round(model.transmat_, 2))
+
+    return data
+
+
+
+
+def HMM_exploration(data, analysis_dir, init: bool = True): 
+    """Run full HMM with variing parameters (n_state, features...)
+    init = True run the HMM, set it to False to load precomputed data"""
+
+    for n in range(4, 9): 
     
+        save_path = u.make_path(output_dir, "HMM_results.csv")            
+
+        if init : # run full computation
+
+            # rows must be contiguous per trial and ordered in time within a trial
+            data = data.sort_values(["id", "relative_t"]).reset_index(drop=True)
+
+            behavior_num = {"none": 0, "reach": 1, "open": 2, "grasp": 3, "press": 4}
+            data["spatial_state"] = data["spatial_behavior"].map(behavior_num)
+
+            # # circular variables -> sin/cos (adapt if your angles are in degrees)
+            # for col in ["centroid_direction", "f3_sp_angle"]:
+            #     data[col + "_sin"] = np.sin(data[col])
+            #     data[col + "_cos"] = np.cos(data[col])
+
+            feature_cols = [
+                        "relative_t",
+                        "x", 
+                        "y",
+                        "area", 
+                        "centroid_direction", 
+                        "centroid_velocity", 
+                        "centroid_speed", 
+                        "centroid_acc", 
+                        "f3_sp_distance", 
+                        "f3_sp_angle", 
+                        "centroid_lever_dist",
+                        "spatial_state"
+            ]
+
+            data = data.sort_values(["id", "relative_t"]).reset_index(drop=True)
+
+            # 1) the 6 NaNs in x/y: see where they are
+            bad = data[data["x"].isna()]
+            print(bad[["name", "relative_t",]])
+            bad.to_csv("bad_df.csv")
+
+            # 2) drop the remaining NaNs (derivative edges), then recompute lengths
+            data = data.dropna(subset=feature_cols).reset_index(drop=True)
+
+            print(f"\nFitting best HMM: n_componant = {n}")
+            output_dir = analysis_dir / "behavior" / "HMM" / f"{n}_componant"
+        
+            data = HMM(data, feature_cols, n)
+            
+            save_path = u.make_path(output_dir, "HMM_results.csv")
+            data.to_csv(save_path)
+
+        else :   # load data directly
+            data = pd.read_csv(save_path)
+            print("Loading:", save_path)
+
+        print("Display matrix")
+
+        order = ["none", "reach", "open", "grasp", "press"]
+
+        # trials in which a (true, pred) pair occurs at least once
+        pairs = data[["id", "spatial_behavior", "pred_state"]].drop_duplicates()
+        ct_trials = pd.crosstab(pairs["spatial_behavior"], pairs["pred_state"]).reindex(order)
+
+        # frames, normalised per true phase (rows sum to 1)
+        ct_frames = pd.crosstab(data["spatial_behavior"], data["pred_state"],
+                                normalize="index").reindex(order)
+
+        fig, axes = plt.subplots(1, 2, figsize=(14, 4))
+        sns.heatmap(ct_trials, annot=True, fmt="d", cmap="viridis", ax=axes[0])
+        axes[0].set_title("Number of trials (pair occurs ≥ once)")
+
+        sns.heatmap(ct_frames, annot=True, fmt=".2f", cmap="viridis", ax=axes[1])
+        axes[1].set_title("Fraction of frames per true phase")
+        for ax in axes:
+            ax.set_xlabel("Predicted HMM state")
+            ax.set_ylabel("Spatial behavior")
+
+        plt.tight_layout()
+        plt.savefig(u.make_path(output_dir, "HMM.png"))
+        plt.savefig(u.make_path(output_dir, "HMM.svg"))
+        plt.close()
+
+        print("Display scatterplot")
+
+        custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+        sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
+
+        BEHAVIOR_PALETTE = {
+                "reach": "yellow", 
+                "open": "orange", 
+                "grasp": "blue", 
+                "press": "green",
+                "none": "gray"
+            }
+                    
+        fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+
+        sns.scatterplot(data, ax=axes[0], x="x", y="y", hue="pred_state", palette="bright", alpha=0.5)
+        sns.scatterplot(data, ax=axes[1], x="x", y="y", hue="spatial_behavior", palette=BEHAVIOR_PALETTE, alpha=0.5)
+
+        axes[0].set_title("Predicted HMM state")
+        axes[1].set_title("Spatial behavior state")
+
+        for ax in axes:
+                    ax.set_xlabel("centroid x (cm)")
+                    ax.set_ylabel("centroid y (cm)")
+
+        plt.tight_layout()
+        plt.savefig(u.make_path(output_dir, "HMM_states_xy.svg"))
+        plt.savefig(u.make_path(output_dir, "HMM_states_xy.png"))
+        plt.close()
+
+        print("Display countplot")
+
+        fig, axes = plt.subplots(1, 2, figsize=(18, 8))
+
+        sns.countplot(data, ax=axes[0], y="pred_state", hue="pred_state", palette="bright")
+        sns.countplot(data, ax=axes[1], y="spatial_behavior", hue="spatial_behavior", palette=BEHAVIOR_PALETTE)
+
+        axes[0].set_title("Predicted HMM state")
+        axes[1].set_title("Spatial behavior state")
+
+        for ax in axes:
+                    ax.set_xlabel("states")
+                    ax.set_ylabel("count")
+
+        plt.tight_layout()
+        plt.savefig(u.make_path(output_dir, "HMM_states_counts.svg"))
+        plt.close()
+
+
+
+############# KEYPOINTS MOSEQ
+
+import keypoint_moseq as kpms
+
+
+def find_Kappa(data, pca, config, project_dir, metadata): 
+     
+    kappas = np.logspace(3,7,5)
+    decrease_kappa_factor = 10
+    num_ar_iters = 50
+    num_full_iters = 200
+
+    prefix = 'my_kappa_scan'
+
+    for kappa in kappas:
+        print(f"Fitting model with kappa={kappa}")
+        model_name = f'{prefix}-{kappa}'
+        model = kpms.init_model(data, pca=pca, **config())
+
+        # stage 1: fit the model with AR only
+        model = kpms.update_hypparams(model, kappa=kappa)
+        model = kpms.fit_model(
+            model,
+            data,
+            metadata,
+            project_dir,
+            model_name,
+            ar_only=True,
+            num_iters=num_ar_iters,
+            save_every_n_iters=25
+        )[0];
+
+        # stage 2: fit the full model
+        model = kpms.update_hypparams(model, kappa=kappa/decrease_kappa_factor)
+        kpms.fit_model(
+            model,
+            data,
+            metadata,
+            project_dir,
+            model_name,
+            ar_only=False,
+            start_iter=num_ar_iters,
+            num_iters=num_full_iters,
+            save_every_n_iters=25
+        );
+
+    kpms.plot_kappa_scan(kappas, project_dir, prefix)
+
+        
+def Keypoint_MoSeq_exploration(project_dir, dlc_dir, raw_video_dir, ): 
+
+    config = lambda: kpms.load_config(project_dir)
+
+    dlc_config = dlc_dir / "config.yaml"
+    kpms.setup_project(project_dir, deeplabcut_config=dlc_config)
+
+
+    kpms.update_config(
+        project_dir,
+        video_dir=raw_video_dir,
+        anterior_bodyparts=["nose"],
+        posterior_bodyparts=["spine4"],
+        use_bodyparts=["spine4", "spine3", "spine2", "spine1", "head", "nose", "right ear", "left ear"],
+        fps=30,
+    )
+
+
+    # load data (e.g. from DeepLabCut)
+    keypoint_data_path = "dlc_project/videos/"  # can be a file, a directory, or a list of files
+    coordinates, confidences, bodyparts = kpms.load_keypoints(keypoint_data_path, "deeplabcut")
+
+    kpms.update_config(project_dir, outlier_scale_factor=6.0)
+
+    coordinates, confidences = kpms.outlier_removal(
+        coordinates,
+        confidences,
+        project_dir,
+        overwrite=False,
+        **config()
+    )
+
+    # format data
+    data, metadata = kpms.format_data(coordinates, confidences, **config())
+
+    # run pca
+    pca = kpms.fit_pca(**data, **config())
+    kpms.save_pca(pca, project_dir)
+
+    kpms.print_dims_to_explain_variance(pca, 0.9)
+    kpms.plot_scree(pca, project_dir=project_dir)
+    kpms.plot_pcs(pca, project_dir=project_dir, **config())
+
+    # use the following to load an already fit model
+    # pca = kpms.load_pca(project_dir)
+
+    find_Kappa(data, pca, config, project_dir, metadata)
+
+    kpms.update_config(project_dir, latent_dim=4)
+    kpms.update_config(
+        project_dir,
+        sigmasq_loc=kpms.estimate_sigmasq_loc(data["Y"], data["mask"], filter_size=config()["fps"])
+    )
+
+    # init model with modified KAPPA
+    model = kpms.init_model(data, pca=pca, **config(), 
+                            location_aware=True # setting when spatiality is important
+                            )  
+    model = kpms.update_hypparams(model, kappa=KAPPA)
+
+    # fitting of the AR-HMM
+    num_ar_iters = 50
+
+    model, model_name = kpms.fit_model(model, data, metadata, 
+                                        project_dir, ar_only=True, num_iters=num_ar_iters,
+                                        location_aware=True # setting when spatiality is important
+                                        )
+
+    # load model checkpoint
+    model, data, metadata, current_iter = kpms.load_checkpoint(project_dir, model_name, iteration=num_ar_iters)
+    model = kpms.update_hypparams(model, kappa=KAPPA)
+
+    # run fitting for an additional 500 iters
+    model = kpms.fit_model(model, data, metadata, 
+                            project_dir, model_name, ar_only=False, 
+                            start_iter=current_iter, num_iters=current_iter + 500,
+                            location_aware=True # setting when spatiality is important
+                            )[0]
+
+    # extract model results
+    # load the most recent model checkpoint
+    model, data, metadata, current_iter = kpms.load_checkpoint(project_dir, model_name)
+
+    # extract results
+    results = kpms.extract_results(model, metadata, project_dir, model_name)
+    kpms.save_results_as_csv(results, project_dir, model_name)
+
+
+    # DISPLAY RESULTS
+
+    kpms.generate_trajectory_plots(coordinates, results, project_dir, model_name, **config())
+
+    kpms.generate_grid_movies(results, project_dir, model_name, coordinates=coordinates, **config())
+
+    kpms.plot_similarity_dendrogram(coordinates, results, project_dir, model_name, **config())

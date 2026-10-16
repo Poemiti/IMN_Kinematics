@@ -8,7 +8,7 @@ from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
 from .Trajectory import TrajectoryDLC
-from .Behavior import Behavior
+import Behavior 
 
 
 
@@ -47,7 +47,7 @@ class Project(BaseProject):
         self.camera_shift_rules: dict = u.load_config(self.config_dir / "rules/camera_shift_rules.yaml")
 
         # setup path
-        self.paths: PathConfig = PathConfig(project_name=self.name)
+        self.paths: PathConfig = PathConfig(project_name=self.name, model=self.project_info["model_path"], raw_videos=self.project_info["raw_videos_path"])
 
         # trial group of the project
         joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
@@ -558,7 +558,7 @@ class Project(BaseProject):
 
             if all(traj.is_valid() for traj in trial.trajectories.values()): 
 
-                behavior = Behavior(coords_set=trial.trajectories,
+                behavior = Behavior.Behavior(coords_set=trial.trajectories,
                                     time_pad_off=trial.time_pad_off, 
                                     cm_per_pixel=trial.cm_per_pixel)
 
@@ -599,6 +599,8 @@ class Project(BaseProject):
         sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
         
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
+        self.trialgroup.crop_laser_period = True
+        self.trialgroup.remove_NOstim = True
 
 
         # ___________________________________________________________________________________________
@@ -629,19 +631,19 @@ class Project(BaseProject):
         ################################# BEHAVIOR ANALYSIS #############################
 
               
-        # self.trialgroup.crop_laser_period = True
-        # self.trialgroup.remove_NOstim = True
-
-        # features = [
-        #             "area", 
-        #             "centroid_direction", 
-        #             "centroid_velocity", 
-        #             "centroid_speed", 
-        #             "centroid_acc", 
-        #             "f3_sp_distance", 
-        #             "f3_sp_angle", 
-        #             "centroid_lever_dist"
-        # ]
+        features = [
+                    "relative_t",
+                    "x", 
+                    "y",
+                    "area", 
+                    "centroid_direction", 
+                    "centroid_velocity", 
+                    "centroid_speed", 
+                    "centroid_acc", 
+                    "f3_sp_distance", 
+                    "f3_sp_angle", 
+                    "centroid_lever_dist"
+        ]
 
         # for feat in features: 
         #     self.trialgroup.plot_tendency_beha_features(
@@ -654,9 +656,43 @@ class Project(BaseProject):
         
         # self.trialgroup.lineplot_traj_centroid(save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),) 
 
-        # self.trialgroup.distri_feat_per_behavior(laser_type="Beta", laser_intensity="low", 
-        #                                          save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", "all_trial.svg"),
-        #                                          features_list=features)
+
+        # for l_type in ["Beta","Conti"] : 
+        #     for l_intensity in ["low", "high"]: 
+        #         for l_state in ["LaserOn", "LaserOff"] : 
+
+        #             self.trialgroup.distri_feat_per_behavior(laser_type=l_type, laser_intensity=l_intensity, laser_state=l_state,
+        #                                                     save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", f"spatial_behavior_{l_type}_{l_intensity}_{l_state}.svg"),
+        #                                                     features_list=features)
+
+        #             self.trialgroup.distri_feat_per_behavior(data=df, behavior_varname="pred_state", laser_type=l_type, laser_intensity=l_intensity, laser_state=l_state,
+        #                                                     save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", f"HMM_pred_state_{l_type}_{l_intensity}_{l_state}.svg"),
+        #                                                     features_list=features)
+
+
+
+        # self.trialgroup.distri_feat_per_behavior(
+        #                                         save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", "spatial_behavior_state_all.svg"),
+        #                                         features_list=features)
+
+        # self.trialgroup.distri_feat_per_behavior(data=df, behavior_varname="pred_state", 
+        #                                         save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", "HMM_pred_state_all.svg"),
+        #                                         features_list=features)
+
+        # ___________________________________________________________________________________________
+        ################################# BEHAVIOR EXPLORATION #############################
+
+
+        # HMM
+
+        df = self.trialgroup.behavior_features_df(add_identity=True)
+        Behavior.HMM_exploration(df, analysis_dir, init=False)
+
+
+        # Keypoint MoSeq
+
+        kpms_dir = u.make_dir(self.paths.data_root / "Keypoint-MoSeq")
+        Behavior.Keypoint_MoSeq_exploration(kpms_dir, self.paths.model, self.paths.raw_videos)
 
 
         # _________________________________________________________________________________
@@ -666,9 +702,9 @@ class Project(BaseProject):
         ################################# Timeseries
 
 
-        bodypart = "finger_3"
-        self.trialgroup.crop_laser_period = True
-        self.trialgroup.remove_NOstim = True
+        # bodypart = "finger_3"
+        # self.trialgroup.crop_laser_period = True
+        # self.trialgroup.remove_NOstim = True
 
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
@@ -698,59 +734,59 @@ class Project(BaseProject):
         ################################# ALL TRAJ
         ################################# Scalar series
 
-        comparisons = [
-            # Conti vs Beta
-            ("Conti_LaserOff.low",  "Beta_LaserOff.low"),
-            ("Conti_LaserOff.high", "Beta_LaserOff.high"),
-            ("Conti_LaserOn.low",   "Beta_LaserOn.low"),
-            ("Conti_LaserOn.high",  "Beta_LaserOn.high"),
+        # comparisons = [
+        #     # Conti vs Beta
+        #     ("Conti_LaserOff.low",  "Beta_LaserOff.low"),
+        #     ("Conti_LaserOff.high", "Beta_LaserOff.high"),
+        #     ("Conti_LaserOn.low",   "Beta_LaserOn.low"),
+        #     ("Conti_LaserOn.high",  "Beta_LaserOn.high"),
 
-            # Off vs On
-            ("Conti_LaserOff.low",  "Conti_LaserOn.low"),
-            ("Conti_LaserOff.high", "Conti_LaserOn.high"),
-            ("Beta_LaserOff.low",   "Beta_LaserOn.low"),
-            ("Beta_LaserOff.high",  "Beta_LaserOn.high"),
+        #     # Off vs On
+        #     ("Conti_LaserOff.low",  "Conti_LaserOn.low"),
+        #     ("Conti_LaserOff.high", "Conti_LaserOn.high"),
+        #     ("Beta_LaserOff.low",   "Beta_LaserOn.low"),
+        #     ("Beta_LaserOff.high",  "Beta_LaserOn.high"),
 
-            # low vs high
-            ("Beta_LaserOff.low",   "Beta_LaserOff.high"),
-            ("Beta_LaserOn.low",    "Beta_LaserOn.high"),
-            ("Conti_LaserOff.low",  "Conti_LaserOff.high"),
-            ("Conti_LaserOn.low",   "Conti_LaserOn.high"),
-        ]
+        #     # low vs high
+        #     ("Beta_LaserOff.low",   "Beta_LaserOff.high"),
+        #     ("Beta_LaserOn.low",    "Beta_LaserOn.high"),
+        #     ("Conti_LaserOff.low",  "Conti_LaserOff.high"),
+        #     ("Conti_LaserOn.low",   "Conti_LaserOn.high"),
+        # ]
 
-        comparisons_merge_Off = [
-            # conti vs beta
-            ("Conti.low",  "Beta.low"),
-            ("Conti.high", "Beta.high"),
+        # comparisons_merge_Off = [
+        #     # conti vs beta
+        #     ("Conti.low",  "Beta.low"),
+        #     ("Conti.high", "Beta.high"),
 
-            # low vs high
-            ("LaserOff.high", "Conti.high"),
-            ("LaserOff.high",  "Beta.high"),
-            ("LaserOff.low",    "Beta.low"),
-            ("LaserOff.low",   "Conti.low"),
+        #     # low vs high
+        #     ("LaserOff.high", "Conti.high"),
+        #     ("LaserOff.high",  "Beta.high"),
+        #     ("LaserOff.low",    "Beta.low"),
+        #     ("LaserOff.low",   "Conti.low"),
 
-            # condition high vs condition low
-            ("Conti.low", "Conti.high"),
-            ("Beta.low",  "Beta.high"),
+        #     # condition high vs condition low
+        #     ("Conti.low", "Conti.high"),
+        #     ("Beta.low",  "Beta.high"),
 
-            # Beta high ON vs Conti low ON 
-            # (because conti low is suppose to be as damagefull as the beta high)
-            ("Beta.high", "Conti.low"),
-            ("Beta.low", "Conti.high")
-        ]
+        #     # Beta high ON vs Conti low ON 
+        #     # (because conti low is suppose to be as damagefull as the beta high)
+        #     ("Beta.high", "Conti.low"),
+        #     ("Beta.low", "Conti.high")
+        # ]
 
-        metrics = [
-            "avg_velocity_laser_period", 
-            "tortuosity_laser_period", 
-            "tortuosity_pad_to_lever", 
-        ]
+        # metrics = [
+        #     "avg_velocity_laser_period", 
+        #     "tortuosity_laser_period", 
+        #     "tortuosity_pad_to_lever", 
+        # ]
 
-        for metric in metrics: 
-            self.trialgroup.violin_statistic(comparisons, metric=metric, 
-                                             save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}.svg"))
-            self.trialgroup.violin_statistic(comparisons_merge_Off, metric=metric,  merge_Off=True,
-                                             save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}_merged_off.svg"),
-                                             order=["LaserOff", "Conti", "Beta"])
+        # for metric in metrics: 
+        #     self.trialgroup.violin_statistic(comparisons, metric=metric, 
+        #                                      save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}.svg"))
+        #     self.trialgroup.violin_statistic(comparisons_merge_Off, metric=metric,  merge_Off=True,
+        #                                      save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}_merged_off.svg"),
+        #                                      order=["LaserOff", "Conti", "Beta"])
 
 
         ################################# SINGLE TRAJ 

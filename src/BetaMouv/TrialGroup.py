@@ -197,18 +197,20 @@ class TrialGroup(BaseTrialGroup):
         return self._timeseries_df
 
 
-    def behavior_features_df(self) -> pd.DataFrame: 
+    def behavior_features_df(self, add_identity: bool = True) -> pd.DataFrame: 
         if self._behavior_features_df is None:
             frames = []
+            n = 0
+
 
             for trial in tqdm(self.trials, desc="Building behavior_features_df"):
                 if not trial.is_valid() or trial.laser_intensity == "incompatible":
                     continue
 
-                if trial.behavior is None: 
+                if trial.behavior is None or trial.name == "Rat_#517Ambidexter_20240527_Session2_BetaMT300_1mW_Laser3070_RightHemiCHR_L1L25050_C001H001S0001_clip_58": 
                     continue
  
-                if self.remove_NOstim: 
+                if self.remove_NOstim : 
                     if trial.laser_type == "NOstim": 
                         continue
 
@@ -218,11 +220,14 @@ class TrialGroup(BaseTrialGroup):
                 if self.crop_laser_period: 
                     df = traj.crop_xy(df, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
 
-                for col, val in trial.identity().items():
-                    df[col] = [val] * len(df)
+                if add_identity: 
+                    for col, val in trial.identity().items():
+                        df[col] = [val] * len(df)
 
                 df["index_order"] = range(len(df))
                 df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
+                df["id"] = n
+                n+=1
 
                 frames.append(df)
 
@@ -699,20 +704,23 @@ class TrialGroup(BaseTrialGroup):
         fig.show()
 
 
-    def distri_feat_per_behavior(self, save_as,
+    def distri_feat_per_behavior(self, save_as, data = None, behavior_varname = "spatial_behavior",
                                 laser_type: str = None, laser_intensity: str = None, laser_state: str = None, 
                                 features_list: list =  ["x", "y", "area"]) : 
 
-        data = self.behavior_features_df()
-        data = data.loc([data["laser_type"] == laser_type] & 
-                data["laser_intensity"] == laser_intensity &
-                data["laser_type"] == laser_type)
+        if data is None: 
+            data = self.behavior_features_df()
+
+        if laser_state and laser_intensity and laser_type : 
+            data = data.loc[(data["laser_type"] == laser_type) & 
+                            (data["laser_intensity"] == laser_intensity) &
+                            (data["laser_state"] == laser_state)].reset_index(drop=True)
 
         title = f"{laser_type}, {laser_intensity}, {laser_state} - n_trial={data['name'].nunique()}"
 
         # Wide -> long: one row per (t, trial, behavior, feature)
         data_long = data.melt(
-            id_vars=["t", "spatial_behavior", "name"],
+            id_vars=["t", behavior_varname, "name"],
             value_vars=features_list,
             var_name="feature",
             value_name="value",
@@ -721,13 +729,13 @@ class TrialGroup(BaseTrialGroup):
         g = sns.FacetGrid(
             data_long,
             row="feature",
-            col="spatial_behavior",
-            hue="spatial_behavior",
-            palette=BEHAVIOR_PALETTE,
+            col=behavior_varname,
+            hue=behavior_varname,
+            palette=BEHAVIOR_PALETTE if behavior_varname == "spatial_behavior" else "bright",
             sharex=False,   # each feature has its own scale
             sharey=False,   # densities differ between features
             margin_titles=True,
-            height=2.2,
+            height=2,
             aspect=1.2,
         )
 
@@ -739,11 +747,11 @@ class TrialGroup(BaseTrialGroup):
         for text in g._margin_titles_texts:
             text.set_rotation(45)
         g.figure.suptitle(title,  ha='center')
-        g.figure.subplots_adjust(top=0.9, right=0.9)
+        g.figure.subplots_adjust(right=0.9)
 
         g.savefig(save_as)
-        plt.tight_layout()
-        plt.show()
+        # plt.tight_layout()
+        # plt.show()
         plt.close()
 
 
