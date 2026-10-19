@@ -335,16 +335,23 @@ class Project(BaseProject):
             if not trial.is_valid(): 
                 continue
 
-            if "FIBER_BROKEN" in trial.name:        # for the rat 521
-                print("FIBER_BROKEN, skipped")
-                continue
+            output_path = trial.clip_path.parent / f"pred_results_{trial.name}.csv"
+            trial.update(pred_path=output_path)
 
+            trial.save_yaml()
+
+            if output_path.exists(): 
+                print(f"{output_path} already exist, prediction skipped!")
+                continue 
 
             # prediction 
             trial.dlc_predict(model_path=self.paths.model,
-                              output_csv_path=trial.clip_path.parent / f"pred_results_{trial.stem}.csv")
+                              output_csv_path=output_path)
 
-            break
+        #  backup, save joblib
+        self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
+                                    step="prediction")
+        self.trialgroup.save(self.paths.trials_metadata)
 
         
             
@@ -368,8 +375,6 @@ class Project(BaseProject):
         GAP = self.project_info["gap_scale"]
         BODYPARTS = self.project_info["bodyparts"]
 
-        preprocess_records = []
-
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
 
             if not trial.is_valid():
@@ -386,9 +391,21 @@ class Project(BaseProject):
                     shift=trial.camera_shift,
                 )
 
+                if traj.duration_sec < 1.5 : 
+                    traj.set_success("outlier", success=True, reason=f"clip duration < 1.5s")
+                    traj.set_success("validation", success=True, reason=f"clip duration < 1.5s")
+                    trial.trajectories[bodypart] = traj
+                    continue
+
                 raw_coords = traj.compute_instant_metrics()
                 raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
                 n_raw_outliers = int(raw_outlier_mask.sum())
+
+                idx_first_outlier = raw_outlier_mask.index(True)[0]
+
+                # if may video, crop at the first outlier
+                if trial.date.month == 5 and idx_first_outlier < 10: 
+                    raw_coords = traj.crop_xy(raw_coords, start=idx_first_outlier*traj.dt, end=3)
 
                 outlier_filtered_coords = traj.filter_outliers(coords=raw_coords, method="eucli_anchored", gap_scale=GAP)
 
@@ -432,12 +449,7 @@ class Project(BaseProject):
                                     )
                     
                 trial.trajectories[bodypart] = traj
-                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_raw_outliers, "type": "raw", "out_succes": traj.stage_outcomes["outlier"].reason})
-                preprocess_records.append({"trial": trial.name, "bodypart": bodypart, "n_outlier": n_interpolated_outliers, "type": "interpolated", "out_succes": traj.stage_outcomes["outlier"].reason})
 
-
-        outlier_df = pd.DataFrame(preprocess_records)
-        outlier_df.to_csv(preprocess_data_path)
 
         #  backup, save joblib
         self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
@@ -608,23 +620,23 @@ class Project(BaseProject):
 
 
 
-        # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
         # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
-        #                                   subfig_group="subject", 
-        #                                   groups=["laser_type"],
-        #                                   title=self.trialgroup.group_name)
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
+                                          subfig_group="subject", 
+                                          groups=["laser_type"],
+                                          title=self.trialgroup.group_name)
 
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-        #                                   subfig_group="condition", 
-        #                                   groups=["subject", "laser_type", "laser_intensity"],
-        #                                   title=self.trialgroup.group_name)
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+                                          subfig_group="condition", 
+                                          groups=["subject", "laser_type", "laser_intensity"],
+                                          title=self.trialgroup.group_name)
 
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-        #                                   subfig_group=None, 
-        #                                   groups=["subject", "is_valid", "reason"],
-        #                                   title=self.trialgroup.group_name)
+        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+                                          subfig_group=None, 
+                                          groups=["subject", "is_valid", "failing_step"],
+                                          title=self.trialgroup.group_name)
 
 
         # _________________________________________________________________________________
@@ -709,6 +721,8 @@ class Project(BaseProject):
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
         # trial = self.trialgroup.trials[1]
+
+        # behavior_obj = Behavior(trial.trajectories, trial.time_pad_off, trial.cm_per_pixel)
         # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj_with_beha_zones.svg", Beha=behavior_obj)
         # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
         # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")

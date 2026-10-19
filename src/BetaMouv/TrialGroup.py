@@ -105,7 +105,7 @@ class TrialGroup(BaseTrialGroup):
                             "success": outcome.success,
                             "reason": outcome.reason,
                             "is_valid": "valid" if trial.is_valid() else "not_valid",
-                            "reason": trial.failure()                        
+                            "failing_step": trial.failure()                        
                             })
 
             self._success_df = pd.DataFrame(records)

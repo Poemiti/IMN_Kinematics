@@ -6,15 +6,7 @@ from .File import File
 import cv2, yaml
 from pathlib import Path
 
-from skimage.io import imread
-import numpy as np
-import pandas as pd
-from skimage.color import rgb2gray
-from dipy.align.transforms import TranslationTransform2D
-from dipy.align.imaffine import AffineRegistration, MutualInformationMetric
-from skimage import img_as_ubyte
-import matplotlib.pyplot as plt
-from skimage.registration import phase_cross_correlation
+
 
 class Video(BaseVideo): 
 
@@ -38,6 +30,15 @@ class Video(BaseVideo):
 
 
     def compute_camera_shift(self, view: str, ref_path: str, img_path: str, save_as = None):
+        from skimage.io import imread
+        import numpy as np
+        import pandas as pd
+        from skimage.color import rgb2gray
+        from dipy.align.transforms import TranslationTransform2D
+        from dipy.align.imaffine import AffineRegistration
+        from skimage import img_as_ubyte
+        import matplotlib.pyplot as plt
+
         def load_image(path: str):
             path = Path(path)
             if not path.is_file():

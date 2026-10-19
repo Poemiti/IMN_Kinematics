@@ -15,6 +15,7 @@ class Trajectory:
     def __init__(self, coords: pd.DataFrame | None = None):
         self.coords = coords   
         self.dt = coords["t"][1] 
+        self.duration_sec = len(coords) * self.dt
 
 
     # ------------- plotting function ------------    
