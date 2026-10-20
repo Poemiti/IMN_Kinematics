@@ -14,8 +14,9 @@ class Trajectory:
 
     def __init__(self, coords: pd.DataFrame | None = None):
         self.coords = coords   
-        self.dt = coords["t"][1] 
+        self.dt = coords["t"].iloc[1] 
         self.duration_sec = len(coords) * self.dt
+        self.duration_frame = len(coords)
 
 
     # ------------- plotting function ------------    
@@ -28,7 +29,7 @@ class Trajectory:
                         c=coords["t"] if show_time else color, 
                         cmap="viridis" if show_time else None, 
                         label=label)
-        
+         
         if show_time: 
             cbar = fig.colorbar(sc, ax=ax)
             cbar.set_label("t")
@@ -180,11 +181,16 @@ class Trajectory:
 
         # crop coordinates from the pad off to the lever reach
         time_reach_lever =  self._get_lever_reaching_time(pad_off_coords, obj_coords)
-        cropped_coords = pad_off_coords.loc[coords["t"] <= time_reach_lever].reset_index(drop=True)
+        cropped_coords = pad_off_coords.loc[pad_off_coords["t"] <= time_reach_lever].reset_index(drop=True)
         
         direct = self.net_displacement(cropped_coords)
+        path = self.path_length(cropped_coords)
 
-        return self.path_length(cropped_coords) / direct
+        # Avoid division by zero
+        if direct == 0:
+            return 0
+
+        return path / direct
     
 
     def tortuosity_fixed_period(self, coords: pd.DataFrame | None = None, 
@@ -294,7 +300,7 @@ class TrajectoryDLC(Trajectory):
         for outcome in sorted(self.stage_outcomes.values()):
             if not outcome.success:
                 return outcome
-        return None
+        return "successful"
 
 
     ################ saving function ###############

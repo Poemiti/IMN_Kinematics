@@ -195,21 +195,36 @@ class TrajectoryDLC(BaseTrajectory):
         xy = coords[["x", "y"]].to_numpy()
         n = len(xy)
         is_outlier = np.zeros(n, dtype=bool)
+        local_thresholds = np.zeros(n, dtype=float)
+        local_thresholds[0] = threshold
+        local_dists = np.zeros(n, dtype=float)
+        local_dists[0] = threshold
 
         last_good_idx = 0
         for i in range(1, n):
             if np.isnan(xy[i]).any():
                 continue
             gap = i - last_good_idx
-            local_threshold = threshold + gap_scale * (gap - 1)
+            local_threshold = threshold + gap_scale * (gap-1)
+            local_thresholds[i] = local_threshold
             dist = np.linalg.norm(xy[i] - xy[last_good_idx])
+            local_dists[i] = dist
 
             if dist < local_threshold:
                 last_good_idx = i      # accept -> becomes new anchor
             else:
                 is_outlier[i] = True   # stays flagged; anchor NOT updated
-        return is_outlier
+        return is_outlier, local_thresholds, local_dists
 
+    def longest_consecutive_true(self, mask):
+        if not np.any(mask):
+            return 0
+
+        changes = np.diff(np.concatenate(([False], mask, [False])).astype(int))
+        starts = np.where(changes == 1)[0]
+        ends = np.where(changes == -1)[0]
+
+        return np.max(ends - starts)
 
     def filter_outliers(self, coords: pd.DataFrame, method: str = 'eucli', thresh: float=0.6, gap_scale: float= 0.0) -> pd.DataFrame : 
         """
@@ -238,7 +253,7 @@ class TrajectoryDLC(BaseTrajectory):
 
 
         elif method == "eucli_anchored"  : 
-            outlier_mask = self.outlier_euclidian_dist_anchored(coords, threshold=thresh, gap_scale=gap_scale)
+            outlier_mask, local_thresholds, local_dists = self.outlier_euclidian_dist_anchored(coords, threshold=thresh, gap_scale=gap_scale)
 
         filtered_coords.loc[outlier_mask, ["x", "y"]] = np.nan
 
@@ -318,8 +333,11 @@ class TrajectoryDLC(BaseTrajectory):
 
     def plot_preprocess(self, 
                         interpolated_coords, 
+                        interpolated_dist,
                         outlier_filtered_coords,
                         raw_coords,
+                        raw_dist,
+                        local_thresholds,
                         time_pad_off,
                         title, 
                         save_as):
@@ -369,12 +387,14 @@ class TrajectoryDLC(BaseTrajectory):
         _plot_xy([ax_xt, ax_yt], raw_coords, 0*offset, "#d1cbdc","|", "0.raw", time_pad_off)
 
         # raw distances
-        ax_dist.plot(raw_coords["t"], raw_coords["distances"], color="#d1cbdc")
-        ax_dist.scatter(raw_coords["t"], raw_coords["distances"], color="#d1cbdc", marker="|")
+        ax_dist.plot(raw_coords["t"], raw_dist, color="#d1cbdc")
+        ax_dist.scatter(raw_coords["t"], raw_dist, color="#d1cbdc", marker="|")
 
         # interpolated distances
-        ax_dist.plot(interpolated_coords["t"], interpolated_coords["distances"] , color="#0570b0")
-        ax_dist.scatter(interpolated_coords["t"], interpolated_coords["distances"] , color="#0570b0", marker="|")
+        ax_dist.plot(interpolated_coords["t"], interpolated_dist , color="#0570b0")
+        ax_dist.scatter(interpolated_coords["t"], interpolated_dist, color="#0570b0", marker="|")
+
+        ax_dist.plot(raw_coords["t"], local_thresholds, color="green", label="local threshold", lw=0.5, linestyle="--")
         ax_dist.axhline(y=0.55, linestyle="--", color="red", label="threshold", lw=0.5)
         ax_dist.axvline(x=time_pad_off, linestyle="--", color="k", label="pad_off", lw=0.5)
         

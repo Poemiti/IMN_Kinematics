@@ -138,6 +138,9 @@ class Behavior:
         bodypart2 = coords_set[bp2].clean_coords
         bodypart3 = coords_set[bp3].clean_coords
 
+        print(len(bodypart1), len(bodypart2), len(bodypart3), len(bodypart1["t"]))
+
+
         centroid_x = (bodypart1["x"] + bodypart2["x"] + bodypart3["x"]) / 3
         centroid_y = (bodypart1["y"] + bodypart2["y"] + bodypart3["y"]) / 3
 
@@ -409,10 +412,11 @@ def HMM_exploration(data, analysis_dir, init: bool = True):
 
 ############# KEYPOINTS MOSEQ
 
-import keypoint_moseq as kpms
 
 
 def find_Kappa(data, pca, config, project_dir, metadata): 
+    import keypoint_moseq as kpms
+
      
     kappas = np.logspace(3,7,5)
     decrease_kappa_factor = 10
@@ -457,6 +461,7 @@ def find_Kappa(data, pca, config, project_dir, metadata):
 
         
 def Keypoint_MoSeq_exploration(project_dir, dlc_dir, raw_video_dir, ): 
+    import keypoint_moseq as kpms
 
     config = lambda: kpms.load_config(project_dir)
 
@@ -502,8 +507,6 @@ def Keypoint_MoSeq_exploration(project_dir, dlc_dir, raw_video_dir, ):
     # use the following to load an already fit model
     # pca = kpms.load_pca(project_dir)
 
-    find_Kappa(data, pca, config, project_dir, metadata)
-
     kpms.update_config(project_dir, latent_dim=4)
     kpms.update_config(
         project_dir,
@@ -511,6 +514,8 @@ def Keypoint_MoSeq_exploration(project_dir, dlc_dir, raw_video_dir, ):
     )
 
     # init model with modified KAPPA
+    KAPPA = find_Kappa(data, pca, config, project_dir, metadata)
+
     model = kpms.init_model(data, pca=pca, **config(), 
                             location_aware=True # setting when spatiality is important
                             )  

@@ -5,6 +5,7 @@ import joblib, os, shutil
 from pathlib import Path
 import pandas as pd
 from datetime import datetime
+from tqdm import tqdm
 
 
 class TrialGroup:
@@ -16,29 +17,31 @@ class TrialGroup:
         self.filenames = filenames
         self.condition = condition
 
-        self.keep_joblib = []
-        self.trials: list[BaseTrial] = self._filter_joblib()
-
         self.keep_val = []
         for condition, criteria in self.condition.items():
             self.keep_val.extend(value for value, keep in criteria.items() if keep)
         self.group_name = "_".join(self.keep_val)
+        print("\n",self.group_name)
+
+        self.keep_joblib = []
+        self.trials: list[BaseTrial] = self._filter_joblib()
 
         # display output
 
-        print(f"\n--> {len(self.keep_joblib)}/{len(self.filenames)} FILES LOADED")
+        print(f"--> {len(self.keep_joblib)}/{len(self.filenames)} FILES LOADED")
         print(f"--> {len(self.trials)} trials")
-        print(self.group_name)
 
 
     def _filter_joblib(self) -> list[dict]:
         trials = []
 
-        for filename in self.filenames:
+        for filename in tqdm(self.filenames, desc="Loading joblib"):
             if self._keep_file(filename):
 
                 self.keep_joblib.append(filename)
                 records: list = joblib.load(filename)   # list of Trial objects
+                # print(f"{len(records)} added - {filename.stem}")
+
                 trials.extend(records)
             # else:
             #     print(f"Not Keep: {filename.name}")

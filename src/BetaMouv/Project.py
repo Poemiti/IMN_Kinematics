@@ -8,8 +8,8 @@ from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
 from .Trajectory import TrajectoryDLC
-import Behavior 
-
+import src.BetaMouv.Behavior as Behavior
+ 
 
 
 from pathlib import Path
@@ -18,6 +18,7 @@ from src.utils import process_time
 from tqdm import tqdm
 from datetime import datetime
 import pandas as pd
+import numpy as np
 
 import src.utils as u
 import src.BetaMouv.gui.database_filter as Data_filter
@@ -375,81 +376,107 @@ class Project(BaseProject):
         GAP = self.project_info["gap_scale"]
         BODYPARTS = self.project_info["bodyparts"]
 
+        preprocess_data = []
+
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
 
             if not trial.is_valid():
                 continue
 
-            for bodypart in BODYPARTS: 
+            bp_info = {}
+            
+            while True: 
 
-                traj = TrajectoryDLC(
-                    coords_path=trial.pred_path,
-                    view=trial.camera_view,
-                    bodypart=bodypart,
-                    cm_per_pixel=trial.cm_per_pixel,
-                    time_pad_off=trial.time_pad_off,
-                    shift=trial.camera_shift,
-                )
+                for bodypart in BODYPARTS: 
 
-                if traj.duration_sec < 1.5 : 
-                    traj.set_success("outlier", success=True, reason=f"clip duration < 1.5s")
-                    traj.set_success("validation", success=True, reason=f"clip duration < 1.5s")
+                    traj = TrajectoryDLC(
+                        coords_path=trial.pred_path,
+                        view=trial.camera_view,
+                        bodypart=bodypart,
+                        cm_per_pixel=trial.cm_per_pixel,
+                        time_pad_off=trial.time_pad_off,
+                        shift=trial.camera_shift,
+                    )
+
+                    if traj.duration_sec < 1.5 : 
+                        traj.set_success("outlier", success=False, reason=f"clip duration < 1.5s")
+                        traj.set_success("validation", success=False, reason=f"clip duration < 1.5s")
+                        trial.trajectories[bodypart] = traj
+                        preprocess_data.append({"trial": trial.name, "bodypart":bodypart, "n_raw_outlier": n_raw_outliers, 
+                                            "n_interpolated_outlier":n_interpolated_outliers, 
+                                            "valid": traj.stage_outcomes["outlier"].success,
+                                            "reason": traj.stage_outcomes["outlier"].reason})
+                        continue
+
+                    raw_coords = traj.compute_instant_metrics()
+                    raw_outlier_mask, raw_local_thresh, raw_local_dists = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
+                    n_raw_outliers = int(raw_outlier_mask.sum())
+
+                    idx_outlier = np.where(raw_outlier_mask==True)[0]
+                    idx_first_outlier = idx_outlier[0] if len(idx_outlier) > 0 else 999
+
+                    # if may video, crop at the first outlier
+                    if trial.date.month == 5 and idx_first_outlier < 10: 
+                        # print(f"crop at {idx_first_outlier} - trial : {trial.name}")
+                        raw_coords = raw_coords.iloc[idx_first_outlier+1:]
+                        raw_outlier_mask = raw_outlier_mask[idx_first_outlier+1:]
+                        raw_local_dists = raw_local_dists[idx_first_outlier+1:]
+                        raw_local_thresh = raw_local_thresh[idx_first_outlier+1:]
+
+                    outlier_filtered_coords = traj.filter_outliers(coords=raw_coords, method="eucli_anchored", gap_scale=GAP)
+
+                    traj.interpolated_coords = traj.interpolate_data(coords=outlier_filtered_coords, method="spline", max_gap=5)
+                    traj.interpolated_coords = traj.compute_instant_metrics(traj.interpolated_coords)
+
+                    interpolated_outlier_mask, inter_local_thresh, inter_local_dists = traj.outlier_euclidian_dist_anchored(traj.interpolated_coords, threshold=DIST_THRESH, gap_scale=GAP)
+                    n_interpolated_outliers = int(interpolated_outlier_mask.sum())
+
+                    # set outlier stage outcome 
+                    if n_raw_outliers == 0 :
+                        traj.set_success("outlier", success=True, reason=f"0 out")
+                        traj.set_success("validation", success=True, reason=f"0 out")
+                        traj.clean_coords = raw_coords
+
+                    elif n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
+                        traj.set_success("outlier", success=True, reason=f"few out")
+                        traj.set_success("validation", success=True, reason=f"few out")
+                        traj.clean_coords = traj.interpolated_coords
+
+                    elif n_raw_outliers > MAX_OUTLIER and traj.longest_consecutive_true(raw_outlier_mask) > MAX_OUTLIER//2:
+                        traj.set_success("outlier", success=False, reason=f"out cons>{MAX_OUTLIER//2}")
+                        traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
+
+                    elif n_raw_outliers >= 2*MAX_OUTLIER :
+                        traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
+                        traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER*2}")
+                    
+                    elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
+                        traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
+                        traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
+                    
+                    else:
+                        traj.set_success("outlier", success=False, reason=f"out<={MAX_OUTLIER}")
+                        save_as = interpolation_dir / f"interpolation_{bodypart}_{trial.name}.png"
+                            
+                        if not save_as.exists():  # plot only if not exist
+                            traj.plot_preprocess(
+                                            interpolated_coords=traj.interpolated_coords, interpolated_dist=inter_local_dists,
+                                            outlier_filtered_coords=outlier_filtered_coords,
+                                            raw_coords=raw_coords, raw_dist=raw_local_dists,
+                                            local_thresholds=raw_local_thresh,
+                                            time_pad_off=trial.time_pad_off,
+                                            title=f"{trial.group}\nn_out: {n_raw_outliers}|{n_interpolated_outliers} - shift: {trial.camera_shift}",
+                                            save_as=save_as,
+                                        )
+                        
                     trial.trajectories[bodypart] = traj
-                    continue
+                    preprocess_data.append({"trial": trial.name, "bodypart":bodypart, "n_raw_outlier": n_raw_outliers, 
+                                            "n_interpolated_outlier":n_interpolated_outliers, 
+                                            "valid": traj.stage_outcomes["outlier"].success,
+                                            "reason": traj.stage_outcomes["outlier"].reason})
 
-                raw_coords = traj.compute_instant_metrics()
-                raw_outlier_mask = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
-                n_raw_outliers = int(raw_outlier_mask.sum())
-
-                idx_first_outlier = raw_outlier_mask.index(True)[0]
-
-                # if may video, crop at the first outlier
-                if trial.date.month == 5 and idx_first_outlier < 10: 
-                    raw_coords = traj.crop_xy(raw_coords, start=idx_first_outlier*traj.dt, end=3)
-
-                outlier_filtered_coords = traj.filter_outliers(coords=raw_coords, method="eucli_anchored", gap_scale=GAP)
-
-                traj.interpolated_coords = traj.interpolate_data(coords=outlier_filtered_coords, method="spline", max_gap=5)
-                traj.interpolated_coords = traj.compute_instant_metrics(traj.interpolated_coords)
-
-                interpolated_outlier_mask = traj.outlier_euclidian_dist_anchored(traj.interpolated_coords, threshold=DIST_THRESH, gap_scale=GAP)
-                n_interpolated_outliers = int(interpolated_outlier_mask.sum())
-
-                # set outlier stage outcome 
-                if n_raw_outliers == 0 :
-                    traj.set_success("outlier", success=True, reason=f"0 out")
-                    traj.set_success("validation", success=True, reason=f"0 out")
-                    traj.clean_coords = raw_coords
-
-                if n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
-                    traj.set_success("outlier", success=True, reason=f"few out")
-                    traj.set_success("validation", success=True, reason=f"few out")
-                    traj.clean_coords = traj.interpolated_coords
-
-                elif n_raw_outliers >= 2*MAX_OUTLIER :
-                    traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
-                    traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
-                
-                elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
-                    traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
-                    traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
-                
-                else:
-                    traj.set_success("outlier", success=False, reason=f"out<={MAX_OUTLIER}")
-                    save_as = interpolation_dir / f"interpolation_{bodypart}_{trial.name}.png"
-                    
-                    if not save_as.exists():  # plot only if not exist
-                        traj.plot_preprocess(
-                                        interpolated_coords=traj.interpolated_coords,
-                                        outlier_filtered_coords=outlier_filtered_coords,
-                                        raw_coords=raw_coords,
-                                        time_pad_off=trial.time_pad_off,
-                                        title=f"{trial.group}\nn_out: {n_raw_outliers}|{n_interpolated_outliers} - shift: {trial.camera_shift}",
-                                        save_as=save_as,
-                                    )
-                    
-                trial.trajectories[bodypart] = traj
-
+        preprocess_data_df = pd.DataFrame(preprocess_data)
+        preprocess_data_df.to_csv(preprocess_data_path)
 
         #  backup, save joblib
         self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
@@ -569,6 +596,9 @@ class Project(BaseProject):
             # compute behavior state
 
             if all(traj.is_valid() for traj in trial.trajectories.values()): 
+                print(trial.name)
+                # for body, traj in trial.trajectories.items(): 
+                #     print(body, traj.is_valid(), traj.clean_coords is None)
 
                 behavior = Behavior.Behavior(coords_set=trial.trajectories,
                                     time_pad_off=trial.time_pad_off, 
@@ -611,32 +641,171 @@ class Project(BaseProject):
         sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
         
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
+        u.make_dir(analysis_dir)
         self.trialgroup.crop_laser_period = True
         self.trialgroup.remove_NOstim = True
 
+        traj_data = []
 
+        for trial in self.trialgroup.trials:
+            if not trial.is_valid():
+                continue
+
+            trial_traj_data = []
+
+            for bp, traj in trial.trajectories.items():
+
+                coords = traj.clean_coords if traj.is_valid() else traj.coords
+
+                # Store trajectory-level information
+                traj_info = {
+                    "trial": trial.name,
+                    "bodypart": bp,
+                    "n_frames": len(coords),
+                    "is_valid": traj.is_valid(),
+                    "valid_reason": traj.failure(),
+                }
+
+                traj_data.append(traj_info)
+
+                # Store frame-level coordinates for plotting
+                coords_df = coords[["x", "y", "t"]].copy()
+                coords_df["trial"] = trial.name
+                coords_df["bodypart"] = bp
+                coords_df["is_valid"] = traj.is_valid()
+
+                trial_traj_data.append(coords_df)
+
+            # Combine all bodypart trajectories for this trial
+            if trial_traj_data:
+                print(trial.name)
+                plt.close()
+
+                trial_traj_data_df = pd.concat(
+                    trial_traj_data,
+                    ignore_index=True
+                )
+
+                # Plot trajectories
+                plt.figure(figsize=(8, 6))
+
+                sns.lineplot(
+                    data=trial_traj_data_df,
+                    x="x",
+                    y="y",
+                    hue="bodypart", palette="bright",
+                    sort=False,
+                    estimator=None
+                )
+
+                plt.title(f"{trial.name}")
+                plt.axis("equal")
+                plt.show()
+
+
+        traj_data_df = pd.DataFrame(traj_data)
+        traj_data_df.to_csv("traj_data_df.csv")
+
+        # display the proportion of trajectories that don't have the same number of frames
+        # display the proportion of trajectories where not all bodyparts are valid
+        # Group trajectories by trial
+        trial_stats = traj_data_df.groupby("trial").agg(
+            n_bodyparts=("bodypart", "nunique"),
+            n_frames_unique=("n_frames", "nunique"),
+            all_bodyparts_valid=("is_valid", "all"),
+            all_bodyparts_have_same_frames=("n_frames", lambda x: x.nunique() == 1)
+        )
+        trial_stats.to_csv("trial_stat.csv")
+
+        # Proportion of trials where bodyparts have different numbers of frames
+        prop_different_frames = (
+            ~trial_stats["all_bodyparts_have_same_frames"]
+        ).mean()
+
+        # Proportion of trials where at least one bodypart is invalid
+        prop_not_all_valid = (
+            ~trial_stats["all_bodyparts_valid"]
+        ).mean()
+
+        print(f"Number of trials analyzed: {len(trial_stats)}")
+
+        print(
+            f"Trials where bodyparts have different numbers of frames: "
+            f"{prop_different_frames:.1%}"
+        )
+
+        print(
+            f"Trials where not all bodyparts are valid: "
+            f"{prop_not_all_valid:.1%}"
+        )
+        # Trials with different numbers of frames
+        different_frames = trial_stats[
+            ~trial_stats["all_bodyparts_have_same_frames"]
+        ]
+
+        # Trials with at least one invalid bodypart
+        invalid_trials = trial_stats[
+            ~trial_stats["all_bodyparts_valid"]
+        ]
+
+        print("\nTrials with different frame counts:")
+        print(different_frames)
+
+        print("\nTrials with invalid bodyparts:")
+        print(invalid_trials)
+        invalid_trials.to_csv("invalid_trials.csv")
+
+        # --- Proportion of trials where trajectories don't all have the same number of frames ---
+        frames_per_trial = traj_data_df.groupby("trial")["n_frames"].nunique()
+        mismatch_frames = frames_per_trial > 1
+        prop_frame_mismatch = mismatch_frames.mean()
+
+        print(
+            f"Trials with mismatched frame counts across bodyparts: "
+            f"{mismatch_frames.sum()} / {len(mismatch_frames)} "
+            f"({prop_frame_mismatch:.1%})"
+        )
+
+        # --- Proportion of trials where not all bodyparts are valid ---
+        all_valid_per_trial = traj_data_df.groupby("trial")["is_valid"].all()
+        not_all_valid = ~all_valid_per_trial
+        prop_not_all_valid = not_all_valid.mean()
+
+        print(
+            f"Trials where not all bodyparts are valid: "
+            f"{not_all_valid.sum()} / {len(not_all_valid)} "
+            f"({prop_not_all_valid:.1%})"
+        )
+
+        # Optional: breakdown of failure reasons among invalid trajectories
+        print("\nFailure reasons (invalid trajectories only):")
+        print(
+            traj_data_df.loc[~traj_data_df["is_valid"], "valid_reason"]
+            .value_counts()
+        )
+        
         # ___________________________________________________________________________________________
         ################################# SUCCESS RATE / METADATA REPORT #############################
 
 
 
-        self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
+        # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
         # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
 
-        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
-                                          subfig_group="subject", 
-                                          groups=["laser_type"],
-                                          title=self.trialgroup.group_name)
+        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
+        #                                   subfig_group="subject", 
+        #                                   groups=["laser_type"],
+        #                                   title=self.trialgroup.group_name)
 
-        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-                                          subfig_group="condition", 
-                                          groups=["subject", "laser_type", "laser_intensity"],
-                                          title=self.trialgroup.group_name)
+        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+        #                                   subfig_group="condition", 
+        #                                   groups=["subject", "laser_type", "laser_intensity"],
+        #                                   title=self.trialgroup.group_name)
 
-        self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-                                          subfig_group=None, 
-                                          groups=["subject", "is_valid", "failing_step"],
-                                          title=self.trialgroup.group_name)
+        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
+        #                                   subfig_group=None, 
+        #                                   groups=["subject", "is_valid", "failing_step"],
+        #                                   title=self.trialgroup.group_name)
 
 
         # _________________________________________________________________________________
@@ -697,14 +866,14 @@ class Project(BaseProject):
 
         # HMM
 
-        df = self.trialgroup.behavior_features_df(add_identity=True)
-        Behavior.HMM_exploration(df, analysis_dir, init=False)
+        # df = self.trialgroup.behavior_features_df(add_identity=True)
+        # Behavior.HMM_exploration(df, analysis_dir, init=False)
 
 
-        # Keypoint MoSeq
+        # # Keypoint MoSeq
 
-        kpms_dir = u.make_dir(self.paths.data_root / "Keypoint-MoSeq")
-        Behavior.Keypoint_MoSeq_exploration(kpms_dir, self.paths.model, self.paths.raw_videos)
+        # kpms_dir = u.make_dir(self.paths.data_root / "Keypoint-MoSeq")
+        # Behavior.Keypoint_MoSeq_exploration(kpms_dir, self.paths.model, self.paths.raw_videos)
 
 
         # _________________________________________________________________________________
@@ -714,9 +883,9 @@ class Project(BaseProject):
         ################################# Timeseries
 
 
-        # bodypart = "finger_3"
-        # self.trialgroup.crop_laser_period = True
-        # self.trialgroup.remove_NOstim = True
+        bodypart = "finger_3"
+        self.trialgroup.crop_laser_period = True
+        self.trialgroup.remove_NOstim = True
 
         # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
 
@@ -724,7 +893,7 @@ class Project(BaseProject):
 
         # behavior_obj = Behavior(trial.trajectories, trial.time_pad_off, trial.cm_per_pixel)
         # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj_with_beha_zones.svg", Beha=behavior_obj)
-        # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj.svg")
+        # self.trialgroup.lineplot_traj(save_as=u.make_path(analysis_dir, f"{bodypart}_all_traj.svg"))
         # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")
 
         # timeseries_metric = [
@@ -738,11 +907,13 @@ class Project(BaseProject):
         #                     "angle"
         #                     ] 
         # for val in timeseries_metric:
-        #     self.trialgroup.plot_tendency(
+        #     self.trialgroup.plot_tendency_metrics(
         #         value=val,
         #         save_as=u.make_path(analysis_dir / "tendency" / bodypart, f"{val}.svg"),
-        #         # show_units=True,
+        #         # show_units=True, 
         #     )
+
+        
 
 
         ################################# ALL TRAJ
