@@ -3,8 +3,6 @@
 from src.Base.Trial import Trial as BaseTrial
 from .Leds import Leds
 from .File import File
-from .Trajectory import TrajectoryDLC
-from.Behavior import Behavior
 
 import pandas as pd
 from pathlib import Path
@@ -33,12 +31,11 @@ class Trial(BaseTrial):
         "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
         # computed after prediction and metadata_building
-        "pred_path", "behavior",
-        "trajectories"
+        "pred_path", "trajectories"
     )
 
 
-    YAML_FIELDS = tuple(f for f in FIELDS if f not in ["trajectories", "behavior"])
+    YAML_FIELDS = tuple(f for f in FIELDS)
 
     date: datetime
 
@@ -76,14 +73,10 @@ class Trial(BaseTrial):
 
         # set after prediction
         self.pred_path: str = None
-        self.task_success: bool = False
-        self.task_success_reason: str = "unknown"
 
         # set after preprocessing + validation
-        self.behavior: Behavior = None
         self.camera_shift: tuple[float] = None
-
-        self.trajectories: dict[str, TrajectoryDLC] = {}
+        self.trajectories: dict[str, dict] = {}
 
 
     def bodypart_valid(self, bodypart: str) -> bool:

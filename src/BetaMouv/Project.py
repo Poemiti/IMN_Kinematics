@@ -7,10 +7,8 @@ from .PathConfig import PathConfig
 from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
-from .Trajectory import TrajectoryDLC
+from .Trajectory import TrajectoryDLC, DLCTracking
 import src.BetaMouv.Behavior as Behavior
- 
-
 
 from pathlib import Path
 import yaml, joblib, sys, shutil, traceback
@@ -354,8 +352,7 @@ class Project(BaseProject):
                                     step="prediction")
         self.trialgroup.save(self.paths.trials_metadata)
 
-        
-            
+
             
     @process_time  
     def run_preprocessing(self):
@@ -383,105 +380,74 @@ class Project(BaseProject):
             if not trial.is_valid():
                 continue
 
-            bp_info = {}
-            
-            while True: 
+            tracking = DLCTracking(raw_path=trial.pred_path,
+                                        view=trial.camera_view, 
+                                        bodyparts=BODYPARTS,
+                                        time_pad_off=trial.time_pad_off,
+                                        cm_per_pixel=trial.cm_per_pixel,
+                                        shift=trial.camera_shift)
 
-                for bodypart in BODYPARTS: 
+            outlier_results, interpolation_results = tracking.preprocess(DIST_THRESH, GAP, "sline", 5)
 
-                    traj = TrajectoryDLC(
-                        coords_path=trial.pred_path,
-                        view=trial.camera_view,
-                        bodypart=bodypart,
-                        cm_per_pixel=trial.cm_per_pixel,
-                        time_pad_off=trial.time_pad_off,
-                        shift=trial.camera_shift,
-                    )
+            # set outlier stage outcome 
+            for bp in BODYPARTS: 
+                outlier_traj, inter_traj = outlier_results[bp], interpolation_results[bp]
+                raw_outlier_mask = outlier_traj["raw_mask"]
+                n_raw_outliers = int(raw_outlier_mask.sum())
+                n_interpolated_outliers = int(outlier_traj["inter_mask"].sum())
 
-                    if traj.duration_sec < 1.5 : 
-                        traj.set_success("outlier", success=False, reason=f"clip duration < 1.5s")
-                        traj.set_success("validation", success=False, reason=f"clip duration < 1.5s")
-                        trial.trajectories[bodypart] = traj
-                        preprocess_data.append({"trial": trial.name, "bodypart":bodypart, "n_raw_outlier": n_raw_outliers, 
-                                            "n_interpolated_outlier":n_interpolated_outliers, 
-                                            "valid": traj.stage_outcomes["outlier"].success,
-                                            "reason": traj.stage_outcomes["outlier"].reason})
-                        continue
+                if n_raw_outliers == 0 :
+                    tracking.update_status(bp, success=True, stage="outlier", reason="0 out")
+                    tracking.update_status(bp, success=True, stage="validation", reason="0 out",
+                                                new_coords=tracking.coords_set[bp],  state="raw",)
 
-                    raw_coords = traj.compute_instant_metrics()
-                    raw_outlier_mask, raw_local_thresh, raw_local_dists = traj.outlier_euclidian_dist_anchored(coords=raw_coords, threshold=DIST_THRESH, gap_scale=GAP)
-                    n_raw_outliers = int(raw_outlier_mask.sum())
+                elif n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
+                    tracking.update_status(bp, success=True, stage="outlier", reason="few out")
+                    tracking.update_status(bp, success=True, stage="validation", reason="few out",
+                                                new_coords=inter_traj[["x", "y"]], state="interpolated")
+                                           
+                elif n_raw_outliers > MAX_OUTLIER and tracking.longest_consecutive_true(raw_outlier_mask) > MAX_OUTLIER//2:
+                    tracking.update_status(bp, success=False, stage="outlier", reason=f"out cons>{MAX_OUTLIER//2}")
+                    tracking.update_status(bp, success=False, stage="validation", reason=f"out cons>{MAX_OUTLIER//2}",
+                                                new_coords=tracking.coords_set[bp], state="raw")
+                                           
+                elif n_raw_outliers >= 2*MAX_OUTLIER :
+                    tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER*2}")
+                    tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER*2}",
+                                                new_coords=tracking.coords_set[bp], state="raw")
 
-                    idx_outlier = np.where(raw_outlier_mask==True)[0]
-                    idx_first_outlier = idx_outlier[0] if len(idx_outlier) > 0 else 999
+                elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
+                    tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER}")
+                    tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER}",
+                                                new_coords=tracking.coords_set[bp], state="raw")
 
-                    # if may video, crop at the first outlier
-                    if trial.date.month == 5 and idx_first_outlier < 10: 
-                        # print(f"crop at {idx_first_outlier} - trial : {trial.name}")
-                        raw_coords = raw_coords.iloc[idx_first_outlier+1:]
-                        raw_outlier_mask = raw_outlier_mask[idx_first_outlier+1:]
-                        raw_local_dists = raw_local_dists[idx_first_outlier+1:]
-                        raw_local_thresh = raw_local_thresh[idx_first_outlier+1:]
+                else:
+                    tracking.update_status(bp, success=False, stage="outlier", reason=f"out<={MAX_OUTLIER}", 
+                                           new_coords=tracking.coords_set[bp], state="raw")
+                    save_as = interpolation_dir / f"interpolation_{bp}_{trial.name}.png"
 
-                    outlier_filtered_coords = traj.filter_outliers(coords=raw_coords, method="eucli_anchored", gap_scale=GAP)
+                    if not save_as.exists():  # plot only if not exist
+                        tracking.plot_preprocess(
+                                        interpolated_coords=inter_traj, interpolated_dist=inter_traj["local_dist"],
+                                        outlier_filtered_coords=outlier_traj,
+                                        raw_coords=tracking.coords_set[bp], raw_dist=outlier_traj["local_dist"],
+                                        local_thresholds=outlier_traj["local_thresh"],
+                                        time_pad_off=trial.time_pad_off,
+                                        title=f"{trial.group}\nn_out: {n_raw_outliers}|{n_interpolated_outliers} - shift: {trial.camera_shift}",
+                                        save_as=save_as,
+                                    )
 
-                    traj.interpolated_coords = traj.interpolate_data(coords=outlier_filtered_coords, method="spline", max_gap=5)
-                    traj.interpolated_coords = traj.compute_instant_metrics(traj.interpolated_coords)
-
-                    interpolated_outlier_mask, inter_local_thresh, inter_local_dists = traj.outlier_euclidian_dist_anchored(traj.interpolated_coords, threshold=DIST_THRESH, gap_scale=GAP)
-                    n_interpolated_outliers = int(interpolated_outlier_mask.sum())
-
-                    # set outlier stage outcome 
-                    if n_raw_outliers == 0 :
-                        traj.set_success("outlier", success=True, reason=f"0 out")
-                        traj.set_success("validation", success=True, reason=f"0 out")
-                        traj.clean_coords = raw_coords
-
-                    elif n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
-                        traj.set_success("outlier", success=True, reason=f"few out")
-                        traj.set_success("validation", success=True, reason=f"few out")
-                        traj.clean_coords = traj.interpolated_coords
-
-                    elif n_raw_outliers > MAX_OUTLIER and traj.longest_consecutive_true(raw_outlier_mask) > MAX_OUTLIER//2:
-                        traj.set_success("outlier", success=False, reason=f"out cons>{MAX_OUTLIER//2}")
-                        traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
-
-                    elif n_raw_outliers >= 2*MAX_OUTLIER :
-                        traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
-                        traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER*2}")
-                    
-                    elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
-                        traj.set_success("outlier", success=False, reason=f"out>={MAX_OUTLIER}")
-                        traj.set_success("validation", success=False, reason=f"out>={MAX_OUTLIER}")
-                    
-                    else:
-                        traj.set_success("outlier", success=False, reason=f"out<={MAX_OUTLIER}")
-                        save_as = interpolation_dir / f"interpolation_{bodypart}_{trial.name}.png"
-                            
-                        if not save_as.exists():  # plot only if not exist
-                            traj.plot_preprocess(
-                                            interpolated_coords=traj.interpolated_coords, interpolated_dist=inter_local_dists,
-                                            outlier_filtered_coords=outlier_filtered_coords,
-                                            raw_coords=raw_coords, raw_dist=raw_local_dists,
-                                            local_thresholds=raw_local_thresh,
-                                            time_pad_off=trial.time_pad_off,
-                                            title=f"{trial.group}\nn_out: {n_raw_outliers}|{n_interpolated_outliers} - shift: {trial.camera_shift}",
-                                            save_as=save_as,
-                                        )
-                        
-                    trial.trajectories[bodypart] = traj
-                    preprocess_data.append({"trial": trial.name, "bodypart":bodypart, "n_raw_outlier": n_raw_outliers, 
-                                            "n_interpolated_outlier":n_interpolated_outliers, 
-                                            "valid": traj.stage_outcomes["outlier"].success,
-                                            "reason": traj.stage_outcomes["outlier"].reason})
-
-        preprocess_data_df = pd.DataFrame(preprocess_data)
-        preprocess_data_df.to_csv(preprocess_data_path)
-
+            # saving for each trial
+            tracking.save_clean_csv()        
+            trial.trajectories = tracking.status
+            trial.save_yaml()
+        
         #  backup, save joblib
         self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
                                     step="preprocessing")
         self.trialgroup.save(self.paths.trials_metadata)
+
+
 
     @process_time
     def run_validation(self):
@@ -548,6 +514,14 @@ class Project(BaseProject):
             if not trial.is_valid(): 
                 continue
 
+
+            tracking = DLCTracking(aw_path=trial.pred_path,
+                                        view=trial.camera_view, 
+                                        bodyparts=BODYPARTS,
+                                        time_pad_off=trial.time_pad_off,
+                                        cm_per_pixel=trial.cm_per_pixel,
+                                        shift=trial.camera_shift)
+
             for bodypart in BODYPARTS: 
                 
                 state = trial_states.get(f"{bodypart}_{trial.name}")
@@ -555,10 +529,12 @@ class Project(BaseProject):
                 if not state:
                     continue
 
-                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
+                trajectory_status = trial.trajectories.get(bodypart)
 
                 if state == "rejected" :
-                    traj.set_success(stage="validation", success=False, reason="man reject")
+                    tracking.update_status(stage="validation", success=False, reason="man reject")
+                    tracking.update_clean_coords()
+                    trajectory_status.set_success(stage="validation", success=False, reason="man reject")
                     continue
 
                 elif state == "raw":

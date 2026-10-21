@@ -2,6 +2,7 @@
 
 
 from src.Base.Trajectory import TrajectoryDLC as BaseTrajectory
+from src.Base.Trajectory import DLCTracking as BaseDLCTracking
 from .File import File
 
 import pandas as pd
@@ -28,19 +29,14 @@ class TrajectoryDLC(BaseTrajectory):
     file_cls = File 
     STAGES = ("outlier", "validation")
 
-    def __init__(self,
-                coords_path: Path,
+    def __init__(self, coords: pd.DataFrame(),
                 view: str,
                 bodypart: str = "finger_3",
                 cm_per_pixel: float | None = 1,
                 time_pad_off: float = None,
                 shift: tuple[float] | None = (0,0)):
-        super().__init__(coords_path, view, bodypart, cm_per_pixel, time_pad_off, shift, 
+        super().__init__(coords, view, bodypart, cm_per_pixel, time_pad_off, shift, 
                          cfg["fps"], cfg["frame_height_px"], cfg["frame_width_px"])
-
-        self.interpolated_coords = None
-        self.clean_coords = None
-        self.scalar_metrics = None
 
         # some constants from cfg
         self.dt = 1 / cfg["fps"]
@@ -79,257 +75,58 @@ class TrajectoryDLC(BaseTrajectory):
         return scalar_metrics
 
 
-
-    # ------------------------ preprocessing methods --------------------
-
-
-    @staticmethod
-    def _define_likelihood_threshold(coords: pd.DataFrame, thresh: float, percentile: float = None) -> float : 
+    def plot_tendency(self, coords: pd.DataFrame, value , save_as, group, 
+                      laser_state: str= "LaserOff", show_angle: bool=False):
         """
-        Define the threshold of low likelihood coordinates
-        Coords must be a dataframe containing the following columns ['x', 'y', 'likelihood']
+        Plot velocity tendency with error span around the average.
+        Custome error functions available : 
+            - "sem" : Standard Error of the Mean (https://statisticsbyjim.com/hypothesis-testing/standard-error-mean/)
+            How to interprete SEM : 'For a SEM of 3, we know that the typical 
+            difference between a sample mean and the population mean is 3'
         """
-        if coords is None:
-            coords = self.coords
+        from scipy.stats import sem
+
+        if coords is None: 
+            coords = self.coords.copy()
+
+        coords["relative_t"] = (coords["t"] - self.time_pad_off).round(3)
+
+        fig, ax = plt.subplots(figsize=[8, 8])
         
-        if percentile is not None:
-            computed_tresh = coords["likelihood"].quantile(percentile / 100.0)
-        else:
-            computed_tresh = thresh
-
-        return computed_tresh
-
-
-    def filter_likelihood(self, coords: pd.DataFrame, thresh: float, percentile: float = None) -> tuple[pd.DataFrame, float] : 
-        """
-        Returns the filtered coordinates based on the threshold of low likelihood coordinates.
-        Coords must be a dataframe containing the following columns ['x', 'y', 'likelihood']
-        Low confidance point will be set to NaN
-        """
-        if coords is None:
-            coords = self.coords
-
-        computed_thresh = self._define_likelihood_threshold(coords, thresh, percentile)
-
-        # print(f"\nthreshold set to: {computed_thresh}")
-        mask = coords["likelihood"] > computed_thresh
-        filtered_coords: pd.DataFrame = coords.copy()
-        filtered_coords.loc[~mask, ["x", "y"]] = np.nan
+        ax.plot(coords["relative_t"], coords[value], color="k", marker=".")
         
-        return filtered_coords, computed_thresh
+        ax.axvline(x=0, color="k", label="time pad off", linestyle="--", lw=1)
+        ax.axhline(y=0, color="k", linestyle="--", lw=1)
+        if show_angle: 
+            ax.axhline(y=90, color="red", linestyle="--", lw=1)
+            ax.axhline(y=-90, color="red", linestyle="--", lw=1)
+            ax.axhline(y=0, color="red", linestyle="--", lw=1)
 
-    @staticmethod
-    def _remove_consecutiv_outliers(mask):
-        """True = outlier detected"""
-        clean_mask = mask.copy()
-        mask_size = len(mask)
+        if laser_state == "LaserOn":
+            ax.axvspan(xmin=0.025, xmax=0.3, label="laser period", color="tomato", alpha=0.3)
+        else: 
+            ax.axvspan(xmin=0.025, xmax=0.3, label="laser period", color="gray", alpha=0.3)
 
-        is_out = False
+        ax.set_xlabel("Time (sec)")
+        ax.set_ylabel(value)
+        ax.legend(loc="upper right")
 
-        for i in range(mask_size): 
+        title = group[:len(group)//2] + "\n" + group[len(group)//2:]
+        ax.figure.suptitle(f"{title}\n {value} - {self.bodypart} - {laser_state}", ha='center')
+        ax.figure.subplots_adjust(top=0.8)
 
-            if clean_mask[i] and not is_out : # init outlier list
-                print(i, "IS OUT")
-                is_out = True
-                continue
-
-            elif not clean_mask[i] and is_out :  # add outlier
-                print(i, "IS OUT AGAIN")
-                clean_mask[i] = True
-                continue
-
-            elif clean_mask[i] and is_out :  # back to "normality"
-                print(i, "BACK TO NORMALITY")
-                is_out = False
-                continue
-
-        print(clean_mask)
-
-        return clean_mask
-
-    @staticmethod
-    def outlier_regression(self, t: float, x: float, y: float) : 
-        """Return a mask of outliers. True = is an outlier"""
-        s_factor=3.0
-        k=2
-        s=1000
-
-        # Fit splines 
-        tck_x = make_splrep(t, x, k=k, s=s)
-        tck_y = make_splrep(t, y, k=k, s=s)
-
-        # Predicted smooth trajectory
-        x_pred = splev(t, tck_x)
-        y_pred = splev(t, tck_y)
-
-        # Compute dists distance
-        dists = np.sqrt((x - x_pred)**2 + (y - y_pred)**2)
-        thresh = np.nanmean(dists) + s_factor * np.nanstd(dists)
-        return dists < thresh
-
-
-    def outlier_euclidian_dist(self, coords, threshold: float): 
-        """Return a mask of outliers. True = is an outlier
-        Follows euclidian distances"""
-
-        diffs = coords[["x", "y"]].diff()
-        dists = np.sqrt((diffs**2).sum(axis=1))
-
-        # remove consecutive outliers
-        is_outlier = dists >= threshold + 0.1
-        return self._remove_consecutiv_outliers(is_outlier)
-
-
-    def outlier_euclidian_dist_anchored(self, coords: pd.DataFrame, threshold: float, gap_scale: float = 0.0):
-        """
-        Sequential outlier detection anchored on the last CONFIRMED-good point.
-        Correctly catches 'stuck cluster' outliers (consecutive bad points that
-        are close to each other but far from the real trajectory), which a
-        naive previous-point diff cannot see.
-
-        :param threshold: max plausible distance for a single-frame step
-        :param gap_scale: extra allowed distance per frame since last good point,
-                        to avoid falsely flagging legitimate fast movement
-                        after a gap (e.g. during peak reach velocity)
-        """
-        xy = coords[["x", "y"]].to_numpy()
-        n = len(xy)
-        is_outlier = np.zeros(n, dtype=bool)
-        local_thresholds = np.zeros(n, dtype=float)
-        local_thresholds[0] = threshold
-        local_dists = np.zeros(n, dtype=float)
-        local_dists[0] = threshold
-
-        last_good_idx = 0
-        for i in range(1, n):
-            if np.isnan(xy[i]).any():
-                continue
-            gap = i - last_good_idx
-            local_threshold = threshold + gap_scale * (gap-1)
-            local_thresholds[i] = local_threshold
-            dist = np.linalg.norm(xy[i] - xy[last_good_idx])
-            local_dists[i] = dist
-
-            if dist < local_threshold:
-                last_good_idx = i      # accept -> becomes new anchor
-            else:
-                is_outlier[i] = True   # stays flagged; anchor NOT updated
-        return is_outlier, local_thresholds, local_dists
-
-    def longest_consecutive_true(self, mask):
-        if not np.any(mask):
-            return 0
-
-        changes = np.diff(np.concatenate(([False], mask, [False])).astype(int))
-        starts = np.where(changes == 1)[0]
-        ends = np.where(changes == -1)[0]
-
-        return np.max(ends - starts)
-
-    def filter_outliers(self, coords: pd.DataFrame, method: str = 'eucli', thresh: float=0.6, gap_scale: float= 0.0) -> pd.DataFrame : 
-        """
-        Detect outliers in coordinates and put them to NaN
-
-        :param coords: coordinates (must contain x, y columns)
-        :param stat_method:
-        - 'regression': dists distance to computed polynomial regression < threshold
-        - 'eucli': euclidian distance between 2 consecutive points > threshold
-        """
-        if coords is None:
-            coords = self.coords
+        fig.savefig(save_as)
         
-        filtered_coords: pd.DataFrame = coords.copy()
-
-        if method == "regression": 
-
-            t = coords["t"].to_numpy(dtype=float)
-            x = coords["x"].to_numpy(dtype=float)
-            y = coords["y"].to_numpy(dtype=float)
-
-            outlier_mask = self.outlier_regression(t, x, y)
-
-        elif method == "eucli"  : 
-            outlier_mask = self.outlier_euclidian_dist(coords, threshold=thresh)
-
-
-        elif method == "eucli_anchored"  : 
-            outlier_mask, local_thresholds, local_dists = self.outlier_euclidian_dist_anchored(coords, threshold=thresh, gap_scale=gap_scale)
-
-        filtered_coords.loc[outlier_mask, ["x", "y"]] = np.nan
-
-        return filtered_coords
+        # plt.show()
+        plt.close()
 
 
 
-    def interpolate_data(self, coords: pd.DataFrame, method: str, max_gap: int) -> pd.DataFrame:
-        """
-        Interpolates missing values (NaN) in coordinates dataframe.
-        Only for a number of consecutive missing values under max_gap
+class DLCTracking(BaseDLCTracking): 
 
-        :param method: 
-            - 'zero'
-            - 'linear'
-            - 'splinear'
-            - 'cubic'
-            - 'spline'
-        """
-        if coords is None:
-            coords = self.coords
-
-        coords_interpolated = coords.copy() 
-
-        # Minimum valid points required per method
-        min_points = {
-            'zero': 2,
-            'linear': 2,
-            'slinear': 2,
-            'cubic': 4,
-            'spline': 4
-        }
-
-        for col in ["x", "y"]:
-            series = coords[col]
-            before_nans = series.isna().sum()
-            valid = series.dropna()
-
-            # Determine if fallback to linear is needed
-            use_method = method
-            if len(valid) < min_points.get(method, 2):
-                print(f"Column {col} has only {len(valid)} valid points; falling back to linear interpolation.")
-                use_method = 'linear'
-
-            # Perform interpolation for interior gaps
-            if use_method == 'spline':
-                # Use a cubic spline of order 3
-                interp_series = series.interpolate(
-                    method='spline',
-                    order=3,
-                    s=0,
-                    limit=max_gap,
-                    limit_direction='both'
-                )
-            else:
-                interp_series = series.interpolate(
-                    method=use_method,
-                    limit=max_gap,
-                    limit_direction='both'
-                )
-            # Fill leading/trailing small gaps via backward/forward fill
-            interp_series = interp_series.bfill(limit=max_gap)
-            interp_series = interp_series.ffill(limit=max_gap)
-
-            after_nans = interp_series.isna().sum()
-            # print(f"Number of NaNs before interpolation : {before_nans}, after : {after_nans}")
-
-            coords_interpolated[col] = interp_series
-
-        return coords_interpolated
-
-    
-
-
-    ####################### plotting methods ########################
-
+    def __init__(self, raw_path, view, bodyparts, cm_per_pixel, time_pad_off, shift=(0, 0), fps=125, frame_h=512, frame_w=512):
+        super().__init__(raw_path, view, bodyparts, cm_per_pixel, time_pad_off, shift, fps, frame_h, frame_w)
+        
 
     def plot_preprocess(self, 
                         interpolated_coords, 
@@ -422,50 +219,4 @@ class TrajectoryDLC(BaseTrajectory):
 
         plt.tight_layout()
         fig.savefig(save_as)
-        plt.close()
-
-
-    def plot_tendency(self, coords: pd.DataFrame, value , save_as, group, 
-                      laser_state: str= "LaserOff", show_angle: bool=False):
-        """
-        Plot velocity tendency with error span around the average.
-        Custome error functions available : 
-            - "sem" : Standard Error of the Mean (https://statisticsbyjim.com/hypothesis-testing/standard-error-mean/)
-            How to interprete SEM : 'For a SEM of 3, we know that the typical 
-            difference between a sample mean and the population mean is 3'
-        """
-        from scipy.stats import sem
-
-        if coords is None: 
-            coords = self.clean_coords.copy()
-
-        coords["relative_t"] = (coords["t"] - self.time_pad_off).round(3)
-
-        fig, ax = plt.subplots(figsize=[8, 8])
-        
-        ax.plot(coords["relative_t"], coords[value], color="k", marker=".")
-        
-        ax.axvline(x=0, color="k", label="time pad off", linestyle="--", lw=1)
-        ax.axhline(y=0, color="k", linestyle="--", lw=1)
-        if show_angle: 
-            ax.axhline(y=90, color="red", linestyle="--", lw=1)
-            ax.axhline(y=-90, color="red", linestyle="--", lw=1)
-            ax.axhline(y=0, color="red", linestyle="--", lw=1)
-
-        if laser_state == "LaserOn":
-            ax.axvspan(xmin=0.025, xmax=0.3, label="laser period", color="tomato", alpha=0.3)
-        else: 
-            ax.axvspan(xmin=0.025, xmax=0.3, label="laser period", color="gray", alpha=0.3)
-
-        ax.set_xlabel("Time (sec)")
-        ax.set_ylabel(value)
-        ax.legend(loc="upper right")
-
-        title = group[:len(group)//2] + "\n" + group[len(group)//2:]
-        ax.figure.suptitle(f"{title}\n {value} - {self.bodypart} - {laser_state}", ha='center')
-        ax.figure.subplots_adjust(top=0.8)
-
-        fig.savefig(save_as)
-        
-        # plt.show()
         plt.close()

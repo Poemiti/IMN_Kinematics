@@ -242,8 +242,7 @@ class TrajectoryDLC(Trajectory):
     file_cls = BaseFile
     STAGES = ()
 
-    def __init__(self,
-                coords_path: Path,
+    def __init__(self, coords: pd.DataFrame,
                 view: str,
                 bodypart: str = "finger_3",
                 cm_per_pixel: float | None = None,
@@ -253,9 +252,7 @@ class TrajectoryDLC(Trajectory):
                 frame_height_px: int = 512, 
                 frame_width_px: int = 512): 
 
-        self.file = self.file_cls(coords_path)
         self.time_pad_off = time_pad_off
-        self.coords_path = coords_path
         self.view = view
         self.bodypart = bodypart
         self.cm_per_pixel = cm_per_pixel
@@ -266,24 +263,48 @@ class TrajectoryDLC(Trajectory):
         self.frame_height_px = frame_height_px
         self.frame_width_px = frame_width_px
 
-        # traj validity
-        self.stage_outcomes = {name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)}
+        self.coords = super().__init__(coords)
 
-        # raw pixel coordinates, untouched — kept for debugging / overlaying on the source video
-        self.raw_coords = self._open_DLC_results()
-        self.raw_coords = self.raw_coords[self.bodypart].copy()
-        self.raw_coords = self.raw_coords.assign(t=np.arange(len(self.raw_coords)) / self.fps)  # add time column
+    def show_traj(self, coords: pd.DataFrame, show: bool=False, crop_coords: bool=True):
+        if coords is None:
+            coords = self.coords.copy()
 
-        # apply camera shift BEFORE SCALING (because shift is in pixel)
-        self.raw_coords[["x", "y"]] = self.raw_coords[["x", "y"]] + self.shift
+        if crop_coords: 
+            coords = self.crop_xy(coords, self.time_pad_off - 0.1, self.time_pad_off + 0.4)
 
-        # setup coordinates into cartesian plane (bottom-left origin) + cm units
-        self.raw_coords = self._array_to_scaled_cartesian(self.raw_coords)
+        fig, ax = plt.subplots(figsize=(8, 6))
 
-        super().__init__(self.raw_coords)
+        ax = self.plot_traj(coords, ax, fig)
+
+        name = self.file.name.replace("pred_results_", "")
+        title = name[:len(name)//2] + "\n" + name[len(name)//2:]
+
+        ax.set(
+            # xlim=(0, self.frame_height * self.cm_per_pixel),
+            # ylim=(0, self.frame_height * self.cm_per_pixel),
+            title=title,
+            xlabel="X position (cm)",
+            ylabel="Y position (cm)",
+        )
+
+        if show: 
+            plt.show()
+        plt.close()
+
+        return fig
+        
+     
+     # ------------------------ preprocessing methods --------------------
+   
 
 
-    ############## Success function #############
+@dataclass
+class BodypartStatus:
+    bodypart: str
+    coords_state: str
+    stage_outcomes: dict[str, Outcome]
+    duration_frame: int | None = None
+    duration_sec: float | None = None
 
     def set_success(self, stage: str, success: bool, reason: str):
         outcome = self.stage_outcomes.get(stage)
@@ -303,29 +324,149 @@ class TrajectoryDLC(Trajectory):
         return "successful"
 
 
-    ################ saving function ###############
-
     def to_dict(self) -> dict:
         return {
             "bodypart": self.bodypart,
-            "coords": self.coords,
-            "raw_coords": self.raw_coords,
             "stage_outcomes": {k: o.to_dict() for k, o in self.stage_outcomes.items()},
+            "coords_state": self.coords_state,
+            "duration_frame": self.coords.duration_frame,
+            "duration_sec": self.coords.duration_sec,
+            "is_valid": self.is_valid(),
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Trajectory":
-        obj = cls.__new__(cls)   # bypass __init__ (no coords_path to re-read from disk)
+        obj = cls.__new__(cls)   # bypass __init__ 
         obj.bodypart = data["bodypart"]
-        obj.coords = data.get("coords")
-        obj.raw_coords = data.get("raw_coords")
+        obj.state = data["coords_state"],
+        obj.duration_frame = data["duration_frame"],
+        obj.duration_sec = data["duration_sec"],
         obj.stage_outcomes = {k: Outcome.from_dict(v) for k, v in data["stage_outcomes"].items()}
         return obj
 
 
 
-    ################ preprocess function ################
+class DLCTracking:
+    """Defines a whole tracking and methods to save or load DLC output"""
 
+    file_cls = BaseFile
+    STAGES = ("outlier", "validation")
+
+    def __init__(self, 
+                 raw_path: Path,
+                 view: str, 
+                 bodyparts: list[str], 
+                 cm_per_pixel: float, time_pad_off: float, 
+                 shift=(0, 0), fps=125, frame_h=512, frame_w=512):
+        
+        self.file = self.file_cls(raw_path)
+        self.time_pad_off = time_pad_off
+        self.raw_path = raw_path
+        self.clean_path = raw_path.parents / f"clean_{raw_path.stem}.csv"
+        self.view = view
+        self.cm_per_pixel = cm_per_pixel
+        self.shift = shift
+
+        # constants
+        self.fps = fps
+        self.frame_height_px = frame_h
+        self.frame_width_px = frame_w
+
+        # traj validity
+        self.stage_outcomes = {name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)}
+        self.status = {bp: BodypartStatus(bp, coords_state="raw", stage_outcomes=self.stage_outcomes) for bp in bodyparts}
+
+        self.coords_set: dict[str, TrajectoryDLC] = None
+
+    # --- I/O ---
+
+    def save_clean_csv(self, df):
+        if df is None and self.coords_set is not None :
+            df = pd.concat(self.coords_set, axis=1)
+
+        df.to_csv(self.clean_path)
+
+
+    def load(self, path=None, only_valid=True) -> dict[str, Trajectory]:
+        if path is None:
+            df = pd.read_csv(self.raw_path, header=[0, 1, 2], index_col=0)
+        else: 
+            df = pd.read_csv(path, header=[0,1], index_col=0)
+
+        if only_valid: 
+            bps = [bp for bp in self.bodyparts if self.status[bp].is_valid()] 
+        else:
+            bps = self.bodyparts
+
+        self.coords_set = {bp: TrajectoryDLC(df[bp].droplevel(0, axis=1), self.view,
+                                             bp, self.cm_per_pixel, self.time_pad_off,
+                                             self.shift, self.fps, self.frame_height_px, self.frame_width_px) 
+                                             for bp in bps}
+
+        return self.coords_set
+
+    # --- preprocess ---
+
+    def preprocess(self, thresh, gap_scale, interp_method, max_gap) -> pd.DataFrame:
+        """Open raw DLC output
+        1. detect outlier of raw trajectories
+        2. remove thus outliers
+        3. interpolated missing coordinates
+        4. detect outliers of interpolated coordinates
+        Returns a big dataframe containing 2 levels: 
+            1st level = bodypart name
+            2nd level = raw coordinates, raw outlier mask, interpolated coordinates, inter outlier mask"""
+        
+        raw = self.load(only_valid=False)
+        outlier_results = {}
+        interpolated_results = {}
+
+        for bp in self.bodyparts:
+
+            c = self._array_to_scaled_cartesian(raw[bp])
+
+            # 1. outlier removal of raw
+            outlier: pd.DataFrame = self.filter_outliers(c, thresh, gap_scale)
+            
+            # 2. outlier removal of interpolated
+            interpolated = self.interpolate_data(outlier, interp_method, max_gap)
+            interpolated_outlier = self.filter_outliers(interpolated, thresh, gap_scale)
+            interpolated["mask"] = interpolated_outlier["mask"]
+            interpolated["local_dist"] = interpolated_outlier["local_dist"]
+            interpolated["local_thresh"] = interpolated_outlier["local_thresh"]
+
+            outlier_results[bp] = outlier
+            interpolated_results[bp] = interpolated
+
+        outlier_df: pd.DataFrame = pd.concat(outlier_results, axis=1)          # columns: (bodypart, coords)
+        inter_df: pd.DataFrame = pd.concat(interpolated_results, axis=1)          # columns: (bodypart, coords)
+
+        outliers_masks = {bp: data["mask"] for bp, data in outlier_results.items()}
+        crop_idx, crop_necessary = self.crop_begining_frames(outliers_masks)
+
+        if crop_necessary: 
+            outlier_df.crop()
+            inter_df.crop
+
+        return outlier_df, inter_df
+
+
+
+    def crop_begining_frames(self, outliers_mask, lim=10):
+        """Return the index at which to crop the trackings and if crop is necessary"""
+        
+        idx_outliers = [np.where(out_mask==True)[0] for bp, out_mask in outliers_mask]
+        idx_firsts = [idx[0] if len(idx)>0 else -1 
+                        for idx in idx_outliers]
+
+        crop = all(idx > lim for idx in idx_firsts)
+
+        if crop: 
+            crop_idx = idx_firsts.sort()[-1]
+        crop_idx = 999
+
+        return crop_idx, crop
+    
 
     def _to_cartesian(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
         """Flip pixel axes (top-left origin) to a bottom-left-origin cartesian plane
@@ -363,47 +504,162 @@ class TrajectoryDLC(Trajectory):
         return float(x_t.iloc[0]), float(y_t.iloc[0])
 
 
-    def _open_DLC_results(self) -> pd.DataFrame : 
+
+
+    def longest_consecutive_true(self, mask):
+        if not np.any(mask):
+            return 0
+
+        changes = np.diff(np.concatenate(([False], mask, [False])).astype(int))
+        starts = np.where(changes == 1)[0]
+        ends = np.where(changes == -1)[0]
+
+        return np.max(ends - starts)
+
+
+
+    def outlier_euclidian_dist_anchored(self, coords: pd.DataFrame, threshold: float, gap_scale: float = 0.0):
         """
-        Load and clean a DeepLabCut CSV file.
+        Sequential outlier detection anchored on the last CONFIRMED-good point.
+        Correctly catches 'stuck cluster' outliers (consecutive bad points that
+        are close to each other but far from the real trajectory), which a
+        naive previous-point diff cannot see.
+
+        :param threshold: max plausible distance for a single-frame step
+        :param gap_scale: extra allowed distance per frame since last good point,
+                        to avoid falsely flagging legitimate fast movement
+                        after a gap (e.g. during peak reach velocity)
         """
+        xy = coords[["x", "y"]].to_numpy()
+        n = len(xy)
+        is_outlier = np.zeros(n, dtype=bool)
+        local_thresholds = np.zeros(n, dtype=float)
+        local_thresholds[0] = threshold
+        local_dists = np.zeros(n, dtype=float)
+        local_dists[0] = threshold
 
-        # DLC CSV has 3 header rows (scorer, bodyparts, coords)
-        df = pd.read_csv(self.coords_path, header=[0, 1, 2])
-        df.columns = df.columns.droplevel(0)  # remove scorer row
-        clean_df = df.iloc[1:].reset_index(drop=True)
+        last_good_idx = 0
+        for i in range(1, n):
+            if np.isnan(xy[i]).any():
+                continue
+            gap = i - last_good_idx
+            local_threshold = threshold + gap_scale * (gap-1)
+            local_thresholds[i] = local_threshold
+            dist = np.linalg.norm(xy[i] - xy[last_good_idx])
+            local_dists[i] = dist
 
-        return clean_df
+            if dist < local_threshold:
+                last_good_idx = i      # accept -> becomes new anchor
+            else:
+                is_outlier[i] = True   # stays flagged; anchor NOT updated
+        return is_outlier, local_thresholds, local_dists
 
 
+    def filter_outliers(self, coords: pd.DataFrame, thresh: float=0.6, gap_scale: float= 0.0) -> pd.DataFrame : 
+        """
+        Detect outliers in coordinates and put them to NaN
 
-    #####################"" plotting ###################
-
-
-    def show_traj(self, coords: pd.DataFrame, show: bool=False, crop_coords: bool=True):
+        :param coords: coordinates (must contain x, y columns)
+        :param stat_method:
+        - 'regression': dists distance to computed polynomial regression < threshold
+        - 'eucli': euclidian distance between 2 consecutive points > threshold
+        """
         if coords is None:
-            coords = self.coords.copy()
+            coords = self.coords
+        
+        filtered_coords: pd.DataFrame = coords.copy()
 
-        if crop_coords: 
-            coords = self.crop_xy(coords, self.time_pad_off - 0.1, self.time_pad_off + 0.4)
+        outlier_mask, local_thresholds, local_dists = self.outlier_euclidian_dist_anchored(coords, threshold=thresh, gap_scale=gap_scale)
 
-        fig, ax = plt.subplots(figsize=(8, 6))
+        filtered_coords.loc[outlier_mask, ["x", "y"]] = np.nan
+        filtered_coords["mask"] = outlier_mask
+        filtered_coords["local_thresh"] = local_thresholds
+        filtered_coords["local_dists"] = local_dists
 
-        ax = self.plot_traj(coords, ax, fig)
+        return filtered_coords
 
-        name = self.file.name.replace("pred_results_", "")
-        title = name[:len(name)//2] + "\n" + name[len(name)//2:]
 
-        ax.set(
-            # xlim=(0, self.frame_height * self.cm_per_pixel),
-            # ylim=(0, self.frame_height * self.cm_per_pixel),
-            title=title,
-            xlabel="X position (cm)",
-            ylabel="Y position (cm)",
-        )
 
-        if show: 
-            plt.show()
-        plt.close()
+    def interpolate_data(self, coords: pd.DataFrame, method: str, max_gap: int) -> pd.DataFrame:
+        """
+        Interpolates missing values (NaN) in coordinates dataframe.
+        Only for a number of consecutive missing values under max_gap
 
-        return fig
+        :param method: 
+            - 'zero'
+            - 'linear'
+            - 'splinear'
+            - 'cubic'
+            - 'spline'
+        """
+        if coords is None:
+            coords = self.coords
+
+        coords_interpolated = coords.copy() 
+
+        # Minimum valid points required per method
+        min_points = {
+            'zero': 2,
+            'linear': 2,
+            'slinear': 2,
+            'cubic': 4,
+            'spline': 4
+        }
+
+        for col in ["x", "y"]:
+            series = coords[col]
+            before_nans = series.isna().sum()
+            valid = series.dropna()
+
+            # Determine if fallback to linear is needed
+            use_method = method
+            if len(valid) < min_points.get(method, 2):
+                print(f"Column {col} has only {len(valid)} valid points; falling back to linear interpolation.")
+                use_method = 'linear'
+
+            # Perform interpolation for interior gaps
+            if use_method == 'spline':
+                # Use a cubic spline of order 3
+                interp_series = series.interpolate(
+                    method='spline',
+                    order=3,
+                    s=0,
+                    limit=max_gap,
+                    limit_direction='both'
+                )
+            else:
+                interp_series = series.interpolate(
+                    method=use_method,
+                    limit=max_gap,
+                    limit_direction='both'
+                )
+            # Fill leading/trailing small gaps via backward/forward fill
+            interp_series = interp_series.bfill(limit=max_gap)
+            interp_series = interp_series.ffill(limit=max_gap)
+
+            after_nans = interp_series.isna().sum()
+            # print(f"Number of NaNs before interpolation : {before_nans}, after : {after_nans}")
+
+            coords_interpolated[col] = interp_series
+
+        return coords_interpolated
+
+
+    # --- validation ---
+
+    def update_status(self, bp, new_coords = None, state = None, 
+                      success = None, stage = None, reason = None):
+        
+        if state and new_coords:
+            self.coords_set[bp] = new_coords
+            self.status[bp].coords_state = state
+
+        if success and stage and reason: 
+            self.status[bp].set_success(stage, success, reason)
+
+
+    def update_clean_coords(self, bp, new_coords) :
+        clean_coords = self.load(self.clean_path, only_valid=False)
+        clean_coords[bp] = new_coords
+
+        
