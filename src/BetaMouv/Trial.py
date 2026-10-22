@@ -31,7 +31,7 @@ class Trial(BaseTrial):
         "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
         # computed after prediction and metadata_building
-        "pred_path", "trajectories"
+        "pred_path", "clean_pred_path", "trajectories"
     )
 
 
@@ -72,7 +72,8 @@ class Trial(BaseTrial):
         self.group: str = None
 
         # set after prediction
-        self.pred_path: str = None
+        self.pred_path: Path = None
+        self.clean_pred_path: Path = self.pred_path.parent / f"clean_{self.pred_path.stem}.csv" if self.pred_path else None
 
         # set after preprocessing + validation
         self.camera_shift: tuple[float] = None
@@ -153,12 +154,12 @@ class Trial(BaseTrial):
 
     # saving methods 
 
-    def trajectory_outcomes_dict(self) -> dict:
-        """Just the pass/fail per bodypart, yaml-safe — no coordinate data."""
-        return {bp: entry["outcome"].to_dict() 
-                for bp, entry in self.trajectories.items()}
+    # def trajectory_outcomes_dict(self) -> dict:
+    #     """Just the pass/fail per bodypart, yaml-safe — no coordinate data."""
+    #     return {bp: entry["outcome"].to_dict() 
+    #             for bp, entry in self.trajectories.items()}
 
-    def to_yaml_dict(self) -> dict:
-        data = super().to_yaml_dict()  # everything in YAML_FIELDS, normally serialized
-        data["trajectory_outcomes"] = self.trajectory_outcomes_dict()
-        return data
+    # def to_yaml_dict(self) -> dict:
+    #     data = super().to_yaml_dict()  # everything in YAML_FIELDS, normally serialized
+    #     data["trajectory_outcomes"] = self.trajectory_outcomes_dict()
+    #     return data

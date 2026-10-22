@@ -29,12 +29,13 @@ class TrajectoryDLC(BaseTrajectory):
     file_cls = File 
     STAGES = ("outlier", "validation")
 
-    def __init__(self, coords: pd.DataFrame(),
+    def __init__(self, 
+                 coords: pd.DataFrame,
                 view: str,
-                bodypart: str = "finger_3",
-                cm_per_pixel: float | None = 1,
-                time_pad_off: float = None,
-                shift: tuple[float] | None = (0,0)):
+                bodypart: str,
+                cm_per_pixel: float,
+                time_pad_off: float,
+                shift: tuple[float],):
         super().__init__(coords, view, bodypart, cm_per_pixel, time_pad_off, shift, 
                          cfg["fps"], cfg["frame_height_px"], cfg["frame_width_px"])
 
@@ -124,9 +125,25 @@ class TrajectoryDLC(BaseTrajectory):
 
 class DLCTracking(BaseDLCTracking): 
 
-    def __init__(self, raw_path, view, bodyparts, cm_per_pixel, time_pad_off, shift=(0, 0), fps=125, frame_h=512, frame_w=512):
-        super().__init__(raw_path, view, bodyparts, cm_per_pixel, time_pad_off, shift, fps, frame_h, frame_w)
+    def __init__(self, 
+                 path: Path,
+                 view: str, 
+                 bodyparts: list[str], 
+                 cm_per_pixel: float, 
+                 time_pad_off: float, 
+                 shift: tuple[float, float], 
+                 status: dict | None = None):
         
+        super().__init__(path, view, bodyparts, cm_per_pixel, time_pad_off, shift, status, 
+                         cfg["fps"], cfg["frame_height_px"], cfg["frame_width_px"])
+
+        # some constants from cfg
+        self.dt = 1 / cfg["fps"]
+        self.LEVER_POS = self._point_to_scaled_cartesian(cfg["lever_position"][0], cfg["lever_position"][1])
+        self.PAD_POS = self._point_to_scaled_cartesian(cfg["pad_position"][0], cfg["pad_position"][0])
+        self.FRAME_WIDTH_CM =  cfg["frame_width_px"] * self.cm_per_pixel
+        self.FRAME_HEIGHT_CM =  cfg["frame_height_px"] * self.cm_per_pixel
+
 
     def plot_preprocess(self, 
                         interpolated_coords, 

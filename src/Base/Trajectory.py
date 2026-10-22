@@ -5,6 +5,7 @@ import pandas as pd
 from pathlib import Path
 import numpy as np
 from .Outcome import Outcome
+from dataclasses import dataclass, field
 
 import matplotlib.pyplot as plt
 
@@ -13,7 +14,7 @@ class Trajectory:
     """Method only class to compute stuff on coordinates (pd.Dataframes) containing: x, y, t"""
 
     def __init__(self, coords: pd.DataFrame | None = None):
-        self.coords = coords   
+        self.coords = coords 
         self.dt = coords["t"].iloc[1] 
         self.duration_sec = len(coords) * self.dt
         self.duration_frame = len(coords)
@@ -244,10 +245,10 @@ class TrajectoryDLC(Trajectory):
 
     def __init__(self, coords: pd.DataFrame,
                 view: str,
-                bodypart: str = "finger_3",
-                cm_per_pixel: float | None = None,
-                time_pad_off: float = None,
-                shift: tuple[float] | None = (0,0), 
+                bodypart: str,
+                cm_per_pixel: float,
+                time_pad_off: float,
+                shift: tuple[float], 
                 fps: float = 125, 
                 frame_height_px: int = 512, 
                 frame_width_px: int = 512): 
@@ -263,7 +264,7 @@ class TrajectoryDLC(Trajectory):
         self.frame_height_px = frame_height_px
         self.frame_width_px = frame_width_px
 
-        self.coords = super().__init__(coords)
+        super().__init__(coords)
 
     def show_traj(self, coords: pd.DataFrame, show: bool=False, crop_coords: bool=True):
         if coords is None:
@@ -300,11 +301,14 @@ class TrajectoryDLC(Trajectory):
 
 @dataclass
 class BodypartStatus:
+    STAGES = ("outlier", "validation")
     bodypart: str
-    coords_state: str
-    stage_outcomes: dict[str, Outcome]
+    state: str
     duration_frame: int | None = None
     duration_sec: float | None = None
+    stage_outcomes: dict = field(default_factory=lambda: {
+                                name: Outcome(stage=name, order=i)
+                                for i, name in enumerate(BodypartStatus.STAGES)})
 
     def set_success(self, stage: str, success: bool, reason: str):
         outcome = self.stage_outcomes.get(stage)
@@ -328,21 +332,21 @@ class BodypartStatus:
         return {
             "bodypart": self.bodypart,
             "stage_outcomes": {k: o.to_dict() for k, o in self.stage_outcomes.items()},
-            "coords_state": self.coords_state,
-            "duration_frame": self.coords.duration_frame,
-            "duration_sec": self.coords.duration_sec,
+            "state": self.state,
+            "duration_frame": self.duration_frame,
+            "duration_sec": self.duration_sec,
             "is_valid": self.is_valid(),
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "Trajectory":
-        obj = cls.__new__(cls)   # bypass __init__ 
-        obj.bodypart = data["bodypart"]
-        obj.state = data["coords_state"],
-        obj.duration_frame = data["duration_frame"],
-        obj.duration_sec = data["duration_sec"],
-        obj.stage_outcomes = {k: Outcome.from_dict(v) for k, v in data["stage_outcomes"].items()}
-        return obj
+    def from_dict(cls, data: dict) -> "BodypartStatus":
+        return cls(bodypart=data["bodypart"],
+                    state=data["state"],
+                    duration_frame=data.get("duration_frame"),
+                    duration_sec=data.get("duration_sec"),
+                    stage_outcomes={k: Outcome.from_dict(v)
+                                    for k, v in data.get("stage_outcomes", {}).items()},)
+
 
 
 
@@ -350,58 +354,67 @@ class DLCTracking:
     """Defines a whole tracking and methods to save or load DLC output"""
 
     file_cls = BaseFile
-    STAGES = ("outlier", "validation")
 
     def __init__(self, 
-                 raw_path: Path,
+                 path: Path,
                  view: str, 
                  bodyparts: list[str], 
-                 cm_per_pixel: float, time_pad_off: float, 
-                 shift=(0, 0), fps=125, frame_h=512, frame_w=512):
+                 cm_per_pixel: float, 
+                 time_pad_off: float, 
+                 shift: tuple[float, float], 
+                 status: dict | None = None,
+                 fps=125, frame_h=512, frame_w=512):
         
-        self.file = self.file_cls(raw_path)
+        self.file = self.file_cls(path)
         self.time_pad_off = time_pad_off
-        self.raw_path = raw_path
-        self.clean_path = raw_path.parents / f"clean_{raw_path.stem}.csv"
+        self.path = path
         self.view = view
         self.cm_per_pixel = cm_per_pixel
         self.shift = shift
 
         # constants
+        self.bodyparts = bodyparts
         self.fps = fps
         self.frame_height_px = frame_h
         self.frame_width_px = frame_w
 
-        # traj validity
-        self.stage_outcomes = {name: Outcome(stage=name, order=i) for i, name in enumerate(self.STAGES)}
-        self.status = {bp: BodypartStatus(bp, coords_state="raw", stage_outcomes=self.stage_outcomes) for bp in bodyparts}
-
+        self.status = status
+        if self.status is None: 
+            self.status = {bp: BodypartStatus(bp, state="raw") for bp in bodyparts}
+            
         self.coords_set: dict[str, TrajectoryDLC] = None
+        self.scorer: str = None
 
     # --- I/O ---
 
-    def save_clean_csv(self, df):
-        if df is None and self.coords_set is not None :
-            df = pd.concat(self.coords_set, axis=1)
+    def save_csv(self, save_as: Path):
+        data = {bp: traj.coords.set_index("t")
+                for bp, traj in self.coords_set.items()}
 
-        df.to_csv(self.clean_path)
+        df = pd.concat({self.scorer: pd.concat(data, axis=1)}, axis=1)
+        df.to_csv(save_as)
 
 
-    def load(self, path=None, only_valid=True) -> dict[str, Trajectory]:
-        if path is None:
-            df = pd.read_csv(self.raw_path, header=[0, 1, 2], index_col=0)
-        else: 
-            df = pd.read_csv(path, header=[0,1], index_col=0)
+    def load(self, only_valid=True) -> dict[str, Trajectory]:
+        df = pd.read_csv(self.path, header=[0, 1, 2], index_col=0)
+        self.scorer = df.columns[0][0]
+        df = df.droplevel(0, axis=1)
+        df = df.iloc[1:].reset_index(drop=True)
+        df.index = np.arange(len(df)) / self.fps
+        df.index.name = "t"
 
         if only_valid: 
             bps = [bp for bp in self.bodyparts if self.status[bp].is_valid()] 
         else:
             bps = self.bodyparts
 
-        self.coords_set = {bp: TrajectoryDLC(df[bp].droplevel(0, axis=1), self.view,
+        self.coords_set = {bp: TrajectoryDLC(df[bp].reset_index(), self.view,
                                              bp, self.cm_per_pixel, self.time_pad_off,
                                              self.shift, self.fps, self.frame_height_px, self.frame_width_px) 
                                              for bp in bps}
+        for bp, stat in self.status.items(): 
+            stat.duration_frame = self.coords_set[bp].duration_frame
+            stat.duration_sec = self.coords_set[bp].duration_sec
 
         return self.coords_set
 
@@ -423,7 +436,7 @@ class DLCTracking:
 
         for bp in self.bodyparts:
 
-            c = self._array_to_scaled_cartesian(raw[bp])
+            c = self._array_to_scaled_cartesian(raw[bp].coords)
 
             # 1. outlier removal of raw
             outlier: pd.DataFrame = self.filter_outliers(c, thresh, gap_scale)
@@ -431,8 +444,9 @@ class DLCTracking:
             # 2. outlier removal of interpolated
             interpolated = self.interpolate_data(outlier, interp_method, max_gap)
             interpolated_outlier = self.filter_outliers(interpolated, thresh, gap_scale)
+
             interpolated["mask"] = interpolated_outlier["mask"]
-            interpolated["local_dist"] = interpolated_outlier["local_dist"]
+            interpolated["local_dists"] = interpolated_outlier["local_dists"]
             interpolated["local_thresh"] = interpolated_outlier["local_thresh"]
 
             outlier_results[bp] = outlier
@@ -445,27 +459,34 @@ class DLCTracking:
         crop_idx, crop_necessary = self.crop_begining_frames(outliers_masks)
 
         if crop_necessary: 
-            outlier_df.crop()
-            inter_df.crop
+            outlier_df = outlier_df.iloc[crop_idx:]
+            inter_df = inter_df.iloc[crop_idx:]
 
         return outlier_df, inter_df
 
 
 
-    def crop_begining_frames(self, outliers_mask, lim=10):
-        """Return the index at which to crop the trackings and if crop is necessary"""
-        
-        idx_outliers = [np.where(out_mask==True)[0] for bp, out_mask in outliers_mask]
-        idx_firsts = [idx[0] if len(idx)>0 else -1 
-                        for idx in idx_outliers]
+    def crop_begining_frames(self, outliers_masks, lim=10):
+        """Return the crop index and whether cropping is necessary.
 
-        crop = all(idx > lim for idx in idx_firsts)
+        Crop from the earliest first-outlier index if it occurs within
+        the first `lim` frames for any body part.
+        """
+        first_outlier_idxs = [
+            idx
+            for mask in outliers_masks.values()
+            if (idx := np.flatnonzero(mask)[0:1]).size > 0
+        ]
 
-        if crop: 
-            crop_idx = idx_firsts.sort()[-1]
-        crop_idx = 999
+        if not first_outlier_idxs:
+            return None, False
 
-        return crop_idx, crop
+        first_outlier_idxs = [idx[0] for idx in first_outlier_idxs]
+        crop_idx = min(first_outlier_idxs)
+
+        crop_necessary = crop_idx < lim
+
+        return (crop_idx if crop_necessary else None), crop_necessary
     
 
     def _to_cartesian(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
@@ -647,19 +668,20 @@ class DLCTracking:
 
     # --- validation ---
 
-    def update_status(self, bp, new_coords = None, state = None, 
+    def update_status(self, bp, new_coords: pd.DataFrame = None, state = None, 
                       success = None, stage = None, reason = None):
+        if state: 
+            self.status[bp].state = state
         
-        if state and new_coords:
-            self.coords_set[bp] = new_coords
-            self.status[bp].coords_state = state
+        if state and not new_coords is None:
+            self.coords_set[bp].coords = new_coords
+            self.status[bp].state = state
+            self.status[bp].duration_frame = len(new_coords)
+            self.status[bp].duration_sec = len(new_coords)*(1/self.fps)
 
         if success and stage and reason: 
             self.status[bp].set_success(stage, success, reason)
 
 
-    def update_clean_coords(self, bp, new_coords) :
-        clean_coords = self.load(self.clean_path, only_valid=False)
-        clean_coords[bp] = new_coords
-
-        
+    def status_to_dict(self): 
+        return {bp: stat.to_dict() for bp, stat in self.status}

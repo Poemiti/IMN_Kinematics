@@ -374,73 +374,93 @@ class Project(BaseProject):
         BODYPARTS = self.project_info["bodyparts"]
 
         preprocess_data = []
+        total_trial = len(self.trialgroup.trials)
+        n = 0
 
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
-
             if not trial.is_valid():
+                n+=1
                 continue
 
-            tracking = DLCTracking(raw_path=trial.pred_path,
+            tracking = DLCTracking(path=trial.pred_path,
                                         view=trial.camera_view, 
                                         bodyparts=BODYPARTS,
                                         time_pad_off=trial.time_pad_off,
                                         cm_per_pixel=trial.cm_per_pixel,
                                         shift=trial.camera_shift)
 
-            outlier_results, interpolation_results = tracking.preprocess(DIST_THRESH, GAP, "sline", 5)
+            outlier_results, interpolation_results = tracking.preprocess(DIST_THRESH, GAP, "spline", 5)
 
+            b = 0
             # set outlier stage outcome 
             for bp in BODYPARTS: 
                 outlier_traj, inter_traj = outlier_results[bp], interpolation_results[bp]
-                raw_outlier_mask = outlier_traj["raw_mask"]
+                raw_outlier_mask = outlier_traj["mask"]
                 n_raw_outliers = int(raw_outlier_mask.sum())
-                n_interpolated_outliers = int(outlier_traj["inter_mask"].sum())
+                n_interpolated_outliers = int(inter_traj["mask"].sum())
 
                 if n_raw_outliers == 0 :
+                    b+=1
                     tracking.update_status(bp, success=True, stage="outlier", reason="0 out")
                     tracking.update_status(bp, success=True, stage="validation", reason="0 out",
-                                                new_coords=tracking.coords_set[bp],  state="raw",)
+                                                new_coords=tracking.coords_set[bp].coords,  state="raw",)
 
                 elif n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
+                    b+=1
                     tracking.update_status(bp, success=True, stage="outlier", reason="few out")
                     tracking.update_status(bp, success=True, stage="validation", reason="few out",
-                                                new_coords=inter_traj[["x", "y"]], state="interpolated")
+                                                new_coords=inter_traj[["x", "y", "t"]], state="interpolated")
                                            
                 elif n_raw_outliers > MAX_OUTLIER and tracking.longest_consecutive_true(raw_outlier_mask) > MAX_OUTLIER//2:
+                    b+=1
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out cons>{MAX_OUTLIER//2}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out cons>{MAX_OUTLIER//2}",
-                                                new_coords=tracking.coords_set[bp], state="raw")
+                                                new_coords=tracking.coords_set[bp].coords, state="raw")
                                            
                 elif n_raw_outliers >= 2*MAX_OUTLIER :
+                    b+=1
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER*2}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER*2}",
-                                                new_coords=tracking.coords_set[bp], state="raw")
+                                                new_coords=tracking.coords_set[bp].coords, state="raw")
 
                 elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
+                    b+=1
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER}",
-                                                new_coords=tracking.coords_set[bp], state="raw")
+                                                new_coords=tracking.coords_set[bp].coords, state="raw")
 
                 else:
+                    b+=1
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out<={MAX_OUTLIER}", 
-                                           new_coords=tracking.coords_set[bp], state="raw")
+                                           new_coords=tracking.coords_set[bp].coords, state="need_validation")
                     save_as = interpolation_dir / f"interpolation_{bp}_{trial.name}.png"
+                    raw_coords = tracking._array_to_scaled_cartesian(tracking.coords_set[bp].coords)
 
                     if not save_as.exists():  # plot only if not exist
                         tracking.plot_preprocess(
-                                        interpolated_coords=inter_traj, interpolated_dist=inter_traj["local_dist"],
-                                        outlier_filtered_coords=outlier_traj,
-                                        raw_coords=tracking.coords_set[bp], raw_dist=outlier_traj["local_dist"],
+                                        interpolated_coords=inter_traj[["x", "y", "t"]], interpolated_dist=inter_traj["local_dists"],
+                                        outlier_filtered_coords=outlier_traj[["x", "y", "t"]],
+                                        raw_coords=raw_coords, raw_dist=outlier_traj["local_dists"],
                                         local_thresholds=outlier_traj["local_thresh"],
                                         time_pad_off=trial.time_pad_off,
                                         title=f"{trial.group}\nn_out: {n_raw_outliers}|{n_interpolated_outliers} - shift: {trial.camera_shift}",
                                         save_as=save_as,
                                     )
 
+                if tracking.status[bp].stage_outcomes["outlier"].reason == "not_run": 
+                    print(tracking.status[bp].stage_outcomes["validation"].reason)
+                    print(trial.name)
+                    print(n_raw_outliers, n_interpolated_outliers, print(tracking.longest_consecutive_true(raw_outlier_mask)))
+
+            if b==len(BODYPARTS): 
+                n+=1
+
             # saving for each trial
-            tracking.save_clean_csv()        
-            trial.trajectories = tracking.status
+            tracking.save_csv(trial.clean_pred_path)        
+            trial.update(trajectories = tracking.status)
             trial.save_yaml()
+                
+        print(f"\n[{n} trials view / {total_trial} total trials]")
         
         #  backup, save joblib
         self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
@@ -458,6 +478,8 @@ class Project(BaseProject):
         ==============================================\n""")
 
         BODYPARTS = self.project_info["bodyparts"]
+        DIST_THRESH = self.project_info["distance_thresh"]
+        GAP = self.project_info["gap_scale"]
         
         preprocess_dir = self.paths.analysis(self.trialgroup.keep_val) / "preprocess"
         interpolation_dir = preprocess_dir / "interpolation"
@@ -514,36 +536,42 @@ class Project(BaseProject):
             if not trial.is_valid(): 
                 continue
 
+            if not any(status.state == "need_validation" for bp, status in trial.trajectories.items()) :
+                continue
+            print(trial.name)
 
-            tracking = DLCTracking(aw_path=trial.pred_path,
+            tracking = DLCTracking(path=trial.pred_path,
                                         view=trial.camera_view, 
                                         bodyparts=BODYPARTS,
                                         time_pad_off=trial.time_pad_off,
                                         cm_per_pixel=trial.cm_per_pixel,
-                                        shift=trial.camera_shift)
+                                        shift=trial.camera_shift,
+                                        status=trial.trajectories)
 
-            for bodypart in BODYPARTS: 
+            for bp in BODYPARTS: 
                 
-                state = trial_states.get(f"{bodypart}_{trial.name}")
+                state = trial_states.get(f"{bp}_{trial.name}")
 
                 if not state:
                     continue
 
-                trajectory_status = trial.trajectories.get(bodypart)
-
                 if state == "rejected" :
-                    tracking.update_status(stage="validation", success=False, reason="man reject")
-                    tracking.update_clean_coords()
-                    trajectory_status.set_success(stage="validation", success=False, reason="man reject")
+                    tracking.update_status(bp, stage="validation", success=False, reason="man reject", state="raw")
                     continue
 
                 elif state == "raw":
-                    traj.set_success(stage="validation", success=True, reason="man acc, raw")
-                    traj.clean_coords = traj.coords
+                    tracking.update_status(bp, stage="validation", success=True, reason="man acc, raw", state="raw")
                 else:
-                    traj.set_success(stage="validation", success=True, reason="man acc, inter")
-                    traj.clean_coords = traj.interpolated_coords
+                    tracking.update_status(bp, stage="validation", success=True, reason="man acc, inter", state="interpolated")
+                    tracking.load()
+                    interpolated_coords = tracking.interpolate_data(tracking.filter_outliers(tracking.coords_set[bp], DIST_THRESH, GAP))
+                    tracking.coords_set[bp] = interpolated_coords
+                    tracking.save_csv(trial.clean_pred_path)
 
+            print(tracking.status)
+            trial.update(trajectories = tracking.status)
+            trial.save_yaml()
+            
         #  backup, then save
         self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
                                     step="validation")
@@ -627,139 +655,16 @@ class Project(BaseProject):
             if not trial.is_valid():
                 continue
 
-            trial_traj_data = []
-
-            for bp, traj in trial.trajectories.items():
-
-                coords = traj.clean_coords if traj.is_valid() else traj.coords
-
-                # Store trajectory-level information
-                traj_info = {
-                    "trial": trial.name,
-                    "bodypart": bp,
-                    "n_frames": len(coords),
-                    "is_valid": traj.is_valid(),
-                    "valid_reason": traj.failure(),
-                }
-
-                traj_data.append(traj_info)
-
-                # Store frame-level coordinates for plotting
-                coords_df = coords[["x", "y", "t"]].copy()
-                coords_df["trial"] = trial.name
-                coords_df["bodypart"] = bp
-                coords_df["is_valid"] = traj.is_valid()
-
-                trial_traj_data.append(coords_df)
-
-            # Combine all bodypart trajectories for this trial
-            if trial_traj_data:
-                print(trial.name)
-                plt.close()
-
-                trial_traj_data_df = pd.concat(
-                    trial_traj_data,
-                    ignore_index=True
-                )
-
-                # Plot trajectories
-                plt.figure(figsize=(8, 6))
-
-                sns.lineplot(
-                    data=trial_traj_data_df,
-                    x="x",
-                    y="y",
-                    hue="bodypart", palette="bright",
-                    sort=False,
-                    estimator=None
-                )
-
-                plt.title(f"{trial.name}")
-                plt.axis("equal")
-                plt.show()
+            data = {info: val 
+                                for bp, stat in trial.trajectories.items()
+                                for  info, val in stat.to_dict().items()}
+            data["trial_name"] = trial.name
+            traj_data.append(data)
 
 
         traj_data_df = pd.DataFrame(traj_data)
         traj_data_df.to_csv("traj_data_df.csv")
 
-        # display the proportion of trajectories that don't have the same number of frames
-        # display the proportion of trajectories where not all bodyparts are valid
-        # Group trajectories by trial
-        trial_stats = traj_data_df.groupby("trial").agg(
-            n_bodyparts=("bodypart", "nunique"),
-            n_frames_unique=("n_frames", "nunique"),
-            all_bodyparts_valid=("is_valid", "all"),
-            all_bodyparts_have_same_frames=("n_frames", lambda x: x.nunique() == 1)
-        )
-        trial_stats.to_csv("trial_stat.csv")
-
-        # Proportion of trials where bodyparts have different numbers of frames
-        prop_different_frames = (
-            ~trial_stats["all_bodyparts_have_same_frames"]
-        ).mean()
-
-        # Proportion of trials where at least one bodypart is invalid
-        prop_not_all_valid = (
-            ~trial_stats["all_bodyparts_valid"]
-        ).mean()
-
-        print(f"Number of trials analyzed: {len(trial_stats)}")
-
-        print(
-            f"Trials where bodyparts have different numbers of frames: "
-            f"{prop_different_frames:.1%}"
-        )
-
-        print(
-            f"Trials where not all bodyparts are valid: "
-            f"{prop_not_all_valid:.1%}"
-        )
-        # Trials with different numbers of frames
-        different_frames = trial_stats[
-            ~trial_stats["all_bodyparts_have_same_frames"]
-        ]
-
-        # Trials with at least one invalid bodypart
-        invalid_trials = trial_stats[
-            ~trial_stats["all_bodyparts_valid"]
-        ]
-
-        print("\nTrials with different frame counts:")
-        print(different_frames)
-
-        print("\nTrials with invalid bodyparts:")
-        print(invalid_trials)
-        invalid_trials.to_csv("invalid_trials.csv")
-
-        # --- Proportion of trials where trajectories don't all have the same number of frames ---
-        frames_per_trial = traj_data_df.groupby("trial")["n_frames"].nunique()
-        mismatch_frames = frames_per_trial > 1
-        prop_frame_mismatch = mismatch_frames.mean()
-
-        print(
-            f"Trials with mismatched frame counts across bodyparts: "
-            f"{mismatch_frames.sum()} / {len(mismatch_frames)} "
-            f"({prop_frame_mismatch:.1%})"
-        )
-
-        # --- Proportion of trials where not all bodyparts are valid ---
-        all_valid_per_trial = traj_data_df.groupby("trial")["is_valid"].all()
-        not_all_valid = ~all_valid_per_trial
-        prop_not_all_valid = not_all_valid.mean()
-
-        print(
-            f"Trials where not all bodyparts are valid: "
-            f"{not_all_valid.sum()} / {len(not_all_valid)} "
-            f"({prop_not_all_valid:.1%})"
-        )
-
-        # Optional: breakdown of failure reasons among invalid trajectories
-        print("\nFailure reasons (invalid trajectories only):")
-        print(
-            traj_data_df.loc[~traj_data_df["is_valid"], "valid_reason"]
-            .value_counts()
-        )
-        
         # ___________________________________________________________________________________________
         ################################# SUCCESS RATE / METADATA REPORT #############################
 
