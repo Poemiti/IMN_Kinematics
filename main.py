@@ -28,8 +28,5 @@ if cfg.run_validation:
 if cfg.compute_metrics:
     project.compute_metrics()
 
-if cfg.analysis:
-    project.run_analysis()
-
 
 print(f"\n{project.name} run finished !")
