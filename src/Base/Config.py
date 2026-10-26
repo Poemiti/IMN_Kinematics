@@ -76,7 +76,6 @@ class Config:
         self.run_preprocessing = steps["run_preprocessing"]
         self.run_validation = steps["run_validation"]
         self.compute_metrics = steps["compute_metrics"]
-        self.analysis = steps["analysis"]
 
     def load_project(self) -> object:
         module = import_module(f"src.{self.project_name}.Project")
