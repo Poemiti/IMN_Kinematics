@@ -281,8 +281,6 @@ def HMM_exploration(data, analysis_dir, init: bool = True):
 
     for n in range(4, 9): 
     
-        save_path = u.make_path(output_dir, "HMM_results.csv")            
-
         if init : # run full computation
 
             # rows must be contiguous per trial and ordered in time within a trial

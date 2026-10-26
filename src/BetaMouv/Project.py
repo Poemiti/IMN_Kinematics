@@ -367,7 +367,6 @@ class Project(BaseProject):
         preprocess_data_path = preprocess_dir / "preprocess_data.csv"
 
         interpolation_dir = preprocess_dir / "interpolation"
-        # shutil.rmtree(interpolation_dir, ignore_errors=True)   # clear figures first
         u.make_dir(interpolation_dir)                          # then (re)create
 
         MAX_OUTLIER = self.project_info["max_outlier"]
@@ -380,6 +379,8 @@ class Project(BaseProject):
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
             if not trial.is_valid():
                 continue
+            trial.update(pred_path = Path(trial.pred_path))
+            trial.update(clean_pred_path = trial.pred_path.parent / f"clean_{trial.name}.csv")
 
             tracking = DLCTracking(path=trial.pred_path,
                                         view=trial.camera_view, 
@@ -388,11 +389,11 @@ class Project(BaseProject):
                                         cm_per_pixel=trial.cm_per_pixel,
                                         shift=trial.camera_shift)
 
-            outlier_results, interpolation_results = tracking.preprocess(DIST_THRESH, GAP, "spline", 5)
+            raw_coords_df, outlier_results, interpolation_results = tracking.preprocess(DIST_THRESH, GAP, "spline", 5)
 
             # set outlier stage outcome 
             for bp in BODYPARTS: 
-                outlier_traj, inter_traj = outlier_results[bp], interpolation_results[bp]
+                raw_coords, outlier_traj, inter_traj = raw_coords_df[bp], outlier_results[bp], interpolation_results[bp]
                 raw_outlier_mask = outlier_traj["mask"]
                 n_raw_outliers = int(raw_outlier_mask.sum())
                 n_interpolated_outliers = int(inter_traj["mask"].sum())
@@ -401,7 +402,7 @@ class Project(BaseProject):
                 if n_raw_outliers == 0 :
                     tracking.update_status(bp, success=True, stage="outlier", reason="0 out")
                     tracking.update_status(bp, success=True, stage="validation", reason="0 out",
-                                                new_coords=tracking.coords_set[bp].coords,  state="raw",)
+                                                new_coords=raw_coords,  state="raw",)
 
                 elif n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
                     tracking.update_status(bp, success=True, stage="outlier", reason="few out")
@@ -411,23 +412,22 @@ class Project(BaseProject):
                 elif n_raw_outliers > MAX_OUTLIER and longest_consecutive_outlier > MAX_OUTLIER//2:
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out cons>{MAX_OUTLIER//2}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out cons>{MAX_OUTLIER//2}",
-                                                new_coords=tracking.coords_set[bp].coords, state="raw")
+                                                new_coords=raw_coords, state="raw")
 
                 elif n_raw_outliers >= 2*MAX_OUTLIER :
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER*2}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER*2}",
-                                                new_coords=tracking.coords_set[bp].coords, state="raw")
+                                                new_coords=raw_coords, state="raw")
 
                 elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER}",
-                                                new_coords=tracking.coords_set[bp].coords, state="raw")
+                                                new_coords=raw_coords, state="raw")
 
                 else:
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out<={MAX_OUTLIER}", 
-                                           new_coords=tracking.coords_set[bp].coords, state="need_validation")
+                                           new_coords=raw_coords, state="need_validation")
                     save_as = interpolation_dir / f"interpolation_{bp}_{trial.name}.png"
-                    raw_coords = tracking._array_to_scaled_cartesian(tracking.coords_set[bp].coords)
 
                     if not save_as.exists():  # plot only if not exist
                         tracking.plot_preprocess(

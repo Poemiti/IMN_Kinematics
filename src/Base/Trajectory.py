@@ -483,10 +483,11 @@ class DLCTracking:
         raw = self.load(only_valid=False)
         outlier_results = {}
         interpolated_results = {}
+        raw_coords = {}
 
         for bp in self.bodyparts:
 
-            traj = raw[bp]
+            traj: TrajectoryDLC = raw[bp]
             c = traj._array_to_scaled_cartesian()
 
             # 1. outlier removal of raw
@@ -500,9 +501,11 @@ class DLCTracking:
             interpolated["local_dists"] = interpolated_outlier["local_dists"]
             interpolated["local_thresh"] = interpolated_outlier["local_thresh"]
 
+            raw_coords[bp] = c
             outlier_results[bp] = outlier
             interpolated_results[bp] = interpolated
 
+        raw_coords_df: pd.DataFrame = pd.concat(raw_coords, axis=1)    # columns: (bodypart, coords)
         outlier_df: pd.DataFrame = pd.concat(outlier_results, axis=1)          # columns: (bodypart, coords)
         inter_df: pd.DataFrame = pd.concat(interpolated_results, axis=1)          # columns: (bodypart, coords)
 
@@ -510,10 +513,11 @@ class DLCTracking:
         crop_idx, crop_necessary = self.crop_begining_frames(outliers_masks)
 
         if crop_necessary: 
+            raw_coords_df = raw_coords_df.iloc[crop_idx:]
             outlier_df = outlier_df.iloc[crop_idx:]
             inter_df = inter_df.iloc[crop_idx:]
 
-        return outlier_df, inter_df
+        return raw_coords_df, outlier_df, inter_df
 
 
 
@@ -566,7 +570,7 @@ class DLCTracking:
         local_thresholds = np.zeros(n, dtype=float)
         local_thresholds[0] = threshold
         local_dists = np.zeros(n, dtype=float)
-        local_dists[0] = threshold
+        local_dists[0] = 0
 
         last_good_idx = 0
         for i in range(1, n):

@@ -70,7 +70,7 @@ class TrialGroup(BaseTrialGroup):
 
         self._trial_success_df = None
         self._scalar_df = None
-        self._timeseries_df = None
+        self._kinematics_df = None
         self._bodypart_success_df = None
         self._behavior_df = None
 
@@ -92,7 +92,7 @@ class TrialGroup(BaseTrialGroup):
             "trial_success": self.trial_success_df,
             "bodypart_success": self.bodypart_success_df,
             "behavior": self.behavior_df,
-            "kinematics": self.timeseries_df,
+            "kinematics": self.kinematics_df,
             "scalar": self.scalar_df,
         }
 
@@ -226,15 +226,27 @@ class TrialGroup(BaseTrialGroup):
         return res
 
 
-    def timeseries_df(self) -> pd.DataFrame:
+    def kinematics_df(self) -> pd.DataFrame:
         """Many rows per trial (one per frame/timestamp) : for plots over time."""
 
-        if self._timeseries_df is not None:
-            return self._timeseries_df
+        if self._kinematics_df is not None:
+            data = self._kinematics_df
+            if self.remove_NOstim:
+                data = data[data["trial"]["laser_type"] != "NOstim"]
+
+            if self.crop_laser_period:
+                t = data["trial"]["relative_t"]
+                laser_on = data["trial"]["time_laser_on"]
+
+                data = data[
+                    (t >= laser_on - 0.1) &
+                    (t <= laser_on + 0.325)
+                ]
+            return data
             
         trial_dfs = []
 
-        for trial in tqdm(self.trials, desc="Building timeseries_df"):
+        for trial in tqdm(self.trials, desc="Building kinematics_df"):
             if not trial.is_valid() or trial.laser_intensity == "incompatible":
                 continue
 
@@ -272,7 +284,7 @@ class TrialGroup(BaseTrialGroup):
 
         res = pd.concat(trial_dfs, axis=0, ignore_index=True)
         res.columns.names = ["bodypart", "metric"]
-        self._timeseries_df = res
+        self._kinematics_df = res
 
         return res
 
@@ -280,6 +292,7 @@ class TrialGroup(BaseTrialGroup):
     def behavior_df(self) -> pd.DataFrame: 
         if self._behavior_df is None:
             trial_dict = []
+            n=0
 
             for trial in tqdm(self.trials, desc="Building behavior_df"):
                 if not trial.is_valid() or trial.laser_intensity == "incompatible":
@@ -296,7 +309,7 @@ class TrialGroup(BaseTrialGroup):
                     continue
 
                 if not all(stat["is_valid"] == True for bp, stat in trial.trajectories.items()): 
-                    print(trial.name)
+                    n+=1
                     continue
 
                 behavior = Behavior(coords_set=traj_set,
@@ -312,9 +325,10 @@ class TrialGroup(BaseTrialGroup):
 
                 trial_dict.append(df)
 
-            self._behavior_features_df = pd.concat(trial_dict, ignore_index=True)
+            print(f"Number of trials where not all bodyparts where valid: {n}/{len(trial_dict)}")
+            self._behavior_df = pd.concat(trial_dict, ignore_index=True)
 
-        return self._behavior_features_df
+        return self._behavior_df
 
 
     def load_valid_tracking(self, trial, bodyparts, only_valid=True): 
@@ -364,19 +378,23 @@ class TrialGroup(BaseTrialGroup):
         g.figure.savefig(save_as, bbox_inches="tight")
         if show: 
             plt.show()
-        plt.close(g.figure)
+        plt.close()
 
         print(f"Report saved to: {save_as}")
 
 
     def lineplot_traj(self, save_as, bodypart: str = "finger_3", Beha = None): 
-        data = self.timeseries_df(bodypart)
+        data = self.kinematics_df()
+        data = data[["trial", bodypart]]
+        data.columns = data.columns.droplevel(0)
         return self._lineplot_traj(data=data, save_as=save_as, Beha=Beha,
                     title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
 
 
     def lineplot_traj_per_identity(self, save_as, bodypart: str = "finger_3"): 
-        data = self.timeseries_df(bodypart)
+        data = self.kinematics_df()
+        data = data[["trial", bodypart]]
+        data.columns = data.columns.droplevel(0)
         return self._lineplot_traj_per_indentity(data=data, save_as=save_as,
                     title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
 
@@ -550,7 +568,9 @@ class TrialGroup(BaseTrialGroup):
                                   title=f"{y} - n trials: {len(data.groupby('name'))}",)
 
     def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False, show_beha: str = "spatial_behavior"): 
-        data = self.timeseries_df(bodypart)
+        data = self.kinematics_df()
+        data = data[["trial", bodypart]]
+        data.columns = data.columns.droplevel(0)
         return self._lineplot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units, show_beha=show_beha,
                                   title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
 
