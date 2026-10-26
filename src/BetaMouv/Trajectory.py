@@ -64,7 +64,7 @@ class TrajectoryDLC(BaseTrajectory):
         return coords
 
 
-    def compute_scalar_metrics(self, coords: pd.DataFrame | None = None) -> pd.DataFrame: 
+    def compute_scalar_metrics(self, coords: pd.DataFrame | None = None) -> dict: 
         if coords is None:
             coords = self.coords
         
@@ -125,6 +125,9 @@ class TrajectoryDLC(BaseTrajectory):
 
 class DLCTracking(BaseDLCTracking): 
 
+    file_cls = File
+    trajectory_cls = TrajectoryDLC
+
     def __init__(self, 
                  path: Path,
                  view: str, 
@@ -139,12 +142,42 @@ class DLCTracking(BaseDLCTracking):
 
         # some constants from cfg
         self.dt = 1 / cfg["fps"]
-        self.LEVER_POS = self._point_to_scaled_cartesian(cfg["lever_position"][0], cfg["lever_position"][1])
-        self.PAD_POS = self._point_to_scaled_cartesian(cfg["pad_position"][0], cfg["pad_position"][0])
+        random_traj = TrajectoryDLC(pd.DataFrame({"t": [0, 0], "x": [0, 0], "y": [0, 0]}), view, bodyparts[0], cm_per_pixel, time_pad_off, shift)
+        self.LEVER_POS = random_traj._point_to_scaled_cartesian(cfg["lever_position"][0], cfg["lever_position"][1])
+        self.PAD_POS = random_traj._point_to_scaled_cartesian(cfg["pad_position"][0], cfg["pad_position"][0])
         self.FRAME_WIDTH_CM =  cfg["frame_width_px"] * self.cm_per_pixel
         self.FRAME_HEIGHT_CM =  cfg["frame_height_px"] * self.cm_per_pixel
 
+    def load(self, only_valid=True) -> dict[str, TrajectoryDLC]:
+        df = pd.read_csv(self.path, header=[0, 1, 2], index_col=0)
+        self.scorer = df.columns[0][0]
+        df = df.droplevel(0, axis=1)
+        df = df.iloc[1:].reset_index(drop=True)
+        df.index = np.arange(len(df)) / self.fps
+        df.index.name = "t"
 
+        if only_valid: 
+            bps = [bp for bp in self.bodyparts if self.status[bp].is_valid()]
+            # print([f"{bp}: {stat}" for bp, stat in self.status.items()]) 
+        else:
+            bps = self.bodyparts
+
+        if bps == []: 
+            return None
+
+        self.coords_set = {bp: self.trajectory_cls(df[bp].reset_index(), self.view,
+                                             bp, self.cm_per_pixel, self.time_pad_off, self.shift,) 
+                                             for bp in bps}
+
+        for bp, stat in self.status.items(): 
+            if only_valid and not stat.is_valid() : 
+                continue
+            stat.duration_frame = self.coords_set[bp].duration_frame
+            stat.duration_sec = self.coords_set[bp].duration_sec
+
+        return self.coords_set
+
+    
     def plot_preprocess(self, 
                         interpolated_coords, 
                         interpolated_dist,

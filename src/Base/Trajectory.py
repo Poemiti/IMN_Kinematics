@@ -293,6 +293,47 @@ class TrajectoryDLC(Trajectory):
         plt.close()
 
         return fig
+
+
+    def _to_cartesian(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
+        """Flip pixel axes (top-left origin) to a bottom-left-origin cartesian plane
+        Coordinates must be in pixels"""
+        y = self.frame_height_px - y
+        if self.view != "left":   # non-left views are also mirrored horizontally
+            x = self.frame_width_px - x
+        return x, y
+
+
+    def _scale(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
+        """Convert pixel distances to cm, if a calibration factor is available."""
+        if self.cm_per_pixel is None:
+            return x, y
+        return x * self.cm_per_pixel, y * self.cm_per_pixel
+
+
+    def _array_to_scaled_cartesian(self, coords: pd.DataFrame = None) -> pd.DataFrame:
+        """Full transformation : pixel/top-left -> cartesian/cm, bottom-left origin."""
+        if coords is None: 
+            coords = self.coords
+
+        coords = coords.copy()
+        x, y = self._to_cartesian(coords["x"], coords["y"])
+        x, y = self._scale(x, y)
+        coords["x"], coords["y"] = x, y
+        
+        return coords
+
+
+    def _point_to_scaled_cartesian(self, x: float, y: float) -> tuple[float, float]:
+        """Apply the same flip+scale transform to a single (x, y) point, e.g. lever_position."""
+        x_series = pd.Series([x])
+        y_series = pd.Series([y])
+        x_t, y_t = self._to_cartesian(x_series, y_series)
+        x_t, y_t = self._scale(x_t, y_t)
+
+        return float(x_t.iloc[0]), float(y_t.iloc[0])
+
+
         
      
      # ------------------------ preprocessing methods --------------------
@@ -354,6 +395,7 @@ class DLCTracking:
     """Defines a whole tracking and methods to save or load DLC output"""
 
     file_cls = BaseFile
+    trajectory_cls = TrajectoryDLC
 
     def __init__(self, 
                  path: Path,
@@ -362,7 +404,7 @@ class DLCTracking:
                  cm_per_pixel: float, 
                  time_pad_off: float, 
                  shift: tuple[float, float], 
-                 status: dict | None = None,
+                 status: dict[str, dict] | None = None,
                  fps=125, frame_h=512, frame_w=512):
         
         self.file = self.file_cls(path)
@@ -378,9 +420,10 @@ class DLCTracking:
         self.frame_height_px = frame_h
         self.frame_width_px = frame_w
 
-        self.status = status
-        if self.status is None: 
+        if status is None: 
             self.status = {bp: BodypartStatus(bp, state="raw") for bp in bodyparts}
+        else : 
+            self.status = {bp: BodypartStatus.from_dict(stat) for bp, stat in status.items()}
             
         self.coords_set: dict[str, TrajectoryDLC] = None
         self.scorer: str = None
@@ -404,15 +447,22 @@ class DLCTracking:
         df.index.name = "t"
 
         if only_valid: 
-            bps = [bp for bp in self.bodyparts if self.status[bp].is_valid()] 
+            bps = [bp for bp in self.bodyparts if self.status[bp].is_valid()]
+            # print([f"{bp}: {stat}" for bp, stat in self.status.items()]) 
         else:
             bps = self.bodyparts
 
-        self.coords_set = {bp: TrajectoryDLC(df[bp].reset_index(), self.view,
-                                             bp, self.cm_per_pixel, self.time_pad_off,
-                                             self.shift, self.fps, self.frame_height_px, self.frame_width_px) 
-                                             for bp in bps}
-        for bp, stat in self.status.items(): 
+        if bps == []: 
+            return None
+
+        self.coords_set = {bp: self.trajectory_cls(df[bp].reset_index(), self.view,
+                            bp, self.cm_per_pixel, self.time_pad_off,
+                            self.shift, self.fps, self.frame_height_px, self.frame_width_px) 
+                            for bp in bps}
+
+        for bp, stat in self.status.items():
+            if only_valid and not stat.is_valid() : 
+                continue
             stat.duration_frame = self.coords_set[bp].duration_frame
             stat.duration_sec = self.coords_set[bp].duration_sec
 
@@ -436,7 +486,8 @@ class DLCTracking:
 
         for bp in self.bodyparts:
 
-            c = self._array_to_scaled_cartesian(raw[bp].coords)
+            traj = raw[bp]
+            c = traj._array_to_scaled_cartesian()
 
             # 1. outlier removal of raw
             outlier: pd.DataFrame = self.filter_outliers(c, thresh, gap_scale)
@@ -487,55 +538,13 @@ class DLCTracking:
         crop_necessary = crop_idx < lim
 
         return (crop_idx if crop_necessary else None), crop_necessary
-    
-
-    def _to_cartesian(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
-        """Flip pixel axes (top-left origin) to a bottom-left-origin cartesian plane
-        Coordinates must be in pixels"""
-        y = self.frame_height_px - y
-        if self.view != "left":   # non-left views are also mirrored horizontally
-            x = self.frame_width_px - x
-        return x, y
-
-
-    def _scale(self, x: pd.Series, y: pd.Series) -> tuple[pd.Series, pd.Series]:
-        """Convert pixel distances to cm, if a calibration factor is available."""
-        if self.cm_per_pixel is None:
-            return x, y
-        return x * self.cm_per_pixel, y * self.cm_per_pixel
-
-
-    def _array_to_scaled_cartesian(self, coords: pd.DataFrame) -> pd.DataFrame:
-        """Full transformation : pixel/top-left -> cartesian/cm, bottom-left origin."""
-        coords = coords.copy()
-        x, y = self._to_cartesian(coords["x"], coords["y"])
-        x, y = self._scale(x, y)
-        coords["x"], coords["y"] = x, y
-        
-        return coords
-
-
-    def _point_to_scaled_cartesian(self, x: float, y: float) -> tuple[float, float]:
-        """Apply the same flip+scale transform to a single (x, y) point, e.g. lever_position."""
-        x_series = pd.Series([x])
-        y_series = pd.Series([y])
-        x_t, y_t = self._to_cartesian(x_series, y_series)
-        x_t, y_t = self._scale(x_t, y_t)
-
-        return float(x_t.iloc[0]), float(y_t.iloc[0])
-
-
-
 
     def longest_consecutive_true(self, mask):
-        if not np.any(mask):
-            return 0
-
-        changes = np.diff(np.concatenate(([False], mask, [False])).astype(int))
-        starts = np.where(changes == 1)[0]
-        ends = np.where(changes == -1)[0]
-
-        return np.max(ends - starts)
+        mask = np.asarray(mask, dtype=bool)
+        padded = np.concatenate(([False], mask, [False]))
+        edges = np.flatnonzero(padded[1:] != padded[:-1])
+        
+        return int((edges[1::2] - edges[::2]).max(initial=0))
 
 
 
@@ -668,20 +677,18 @@ class DLCTracking:
 
     # --- validation ---
 
-    def update_status(self, bp, new_coords: pd.DataFrame = None, state = None, 
-                      success = None, stage = None, reason = None):
-        if state: 
+    def update_status(self, bp, new_coords: pd.DataFrame = None, state=None,
+                    success=None, stage=None, reason=None):
+        if state:
             self.status[bp].state = state
-        
-        if state and not new_coords is None:
-            self.coords_set[bp].coords = new_coords
-            self.status[bp].state = state
-            self.status[bp].duration_frame = len(new_coords)
-            self.status[bp].duration_sec = len(new_coords)*(1/self.fps)
 
-        if success and stage and reason: 
+            if new_coords is not None:
+                self.coords_set[bp].coords = new_coords
+                self.status[bp].duration_frame = len(new_coords)
+                self.status[bp].duration_sec = len(new_coords) / self.fps
+
+        if success is not None and stage is not None and reason is not None:
             self.status[bp].set_success(stage, success, reason)
 
-
     def status_to_dict(self): 
-        return {bp: stat.to_dict() for bp, stat in self.status}
+        return {bp: stat.to_dict() for bp, stat in self.status.items()}
