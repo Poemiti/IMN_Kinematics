@@ -374,12 +374,9 @@ class Project(BaseProject):
         BODYPARTS = self.project_info["bodyparts"]
 
         preprocess_data = []
-        total_trial = len(self.trialgroup.trials)
-        n = 0
 
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
             if not trial.is_valid():
-                n+=1
                 continue
 
             tracking = DLCTracking(path=trial.pred_path,
@@ -391,46 +388,40 @@ class Project(BaseProject):
 
             outlier_results, interpolation_results = tracking.preprocess(DIST_THRESH, GAP, "spline", 5)
 
-            b = 0
             # set outlier stage outcome 
             for bp in BODYPARTS: 
                 outlier_traj, inter_traj = outlier_results[bp], interpolation_results[bp]
                 raw_outlier_mask = outlier_traj["mask"]
                 n_raw_outliers = int(raw_outlier_mask.sum())
                 n_interpolated_outliers = int(inter_traj["mask"].sum())
+                longest_consecutive_outlier = tracking.longest_consecutive_true(raw_outlier_mask)
 
                 if n_raw_outliers == 0 :
-                    b+=1
                     tracking.update_status(bp, success=True, stage="outlier", reason="0 out")
                     tracking.update_status(bp, success=True, stage="validation", reason="0 out",
                                                 new_coords=tracking.coords_set[bp].coords,  state="raw",)
 
                 elif n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
-                    b+=1
                     tracking.update_status(bp, success=True, stage="outlier", reason="few out")
                     tracking.update_status(bp, success=True, stage="validation", reason="few out",
                                                 new_coords=inter_traj[["x", "y", "t"]], state="interpolated")
-                                           
-                elif n_raw_outliers > MAX_OUTLIER and tracking.longest_consecutive_true(raw_outlier_mask) > MAX_OUTLIER//2:
-                    b+=1
+                    
+                elif n_raw_outliers > MAX_OUTLIER and longest_consecutive_outlier > MAX_OUTLIER//2:
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out cons>{MAX_OUTLIER//2}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out cons>{MAX_OUTLIER//2}",
                                                 new_coords=tracking.coords_set[bp].coords, state="raw")
-                                           
+
                 elif n_raw_outliers >= 2*MAX_OUTLIER :
-                    b+=1
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER*2}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER*2}",
                                                 new_coords=tracking.coords_set[bp].coords, state="raw")
 
                 elif n_raw_outliers >= MAX_OUTLIER and n_interpolated_outliers >= MAX_OUTLIER:
-                    b+=1
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out>={MAX_OUTLIER}")
                     tracking.update_status(bp, success=False, stage="validation", reason=f"out>={MAX_OUTLIER}",
                                                 new_coords=tracking.coords_set[bp].coords, state="raw")
 
                 else:
-                    b+=1
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out<={MAX_OUTLIER}", 
                                            new_coords=tracking.coords_set[bp].coords, state="need_validation")
                     save_as = interpolation_dir / f"interpolation_{bp}_{trial.name}.png"
@@ -447,21 +438,11 @@ class Project(BaseProject):
                                         save_as=save_as,
                                     )
 
-                if tracking.status[bp].stage_outcomes["outlier"].reason == "not_run": 
-                    print(tracking.status[bp].stage_outcomes["validation"].reason)
-                    print(trial.name)
-                    print(n_raw_outliers, n_interpolated_outliers, print(tracking.longest_consecutive_true(raw_outlier_mask)))
-
-            if b==len(BODYPARTS): 
-                n+=1
-
             # saving for each trial
             tracking.save_csv(trial.clean_pred_path)        
-            trial.update(trajectories = tracking.status)
+            trial.update(trajectories = tracking.status_to_dict())
             trial.save_yaml()
-                
-        print(f"\n[{n} trials view / {total_trial} total trials]")
-        
+                        
         #  backup, save joblib
         self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
                                     step="preprocessing")
@@ -536,9 +517,8 @@ class Project(BaseProject):
             if not trial.is_valid(): 
                 continue
 
-            if not any(status.state == "need_validation" for bp, status in trial.trajectories.items()) :
+            if not any(stat["state"] == "need_validation" for bp, stat in trial.trajectories.items()) :
                 continue
-            print(trial.name)
 
             tracking = DLCTracking(path=trial.pred_path,
                                         view=trial.camera_view, 
@@ -568,8 +548,7 @@ class Project(BaseProject):
                     tracking.coords_set[bp] = interpolated_coords
                     tracking.save_csv(trial.clean_pred_path)
 
-            print(tracking.status)
-            trial.update(trajectories = tracking.status)
+            trial.update(trajectories = tracking.status_to_dict())
             trial.save_yaml()
             
         #  backup, then save
@@ -587,314 +566,16 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        BODYPARTS = self.project_info["bodyparts"]        
-
-        for trial in tqdm(self.trialgroup.trials, desc="Computing metrics"):
-            if not trial.is_valid():    
-                continue
-
-            # video = Video(trial.clip_path)
-            # video.annotate_video(output_path=self.paths.data_root / "annotated_vid" / f"{trial.name}.mp4")
-            # video.extract_frames(frame_range=range(video.frame_count), output_base=self.paths.data_root / "annotated_vid" / "frame", video_path=self.paths.data_root / "annotated_vid" / f"{trial.name}.mp4")
-
-            # compute behavior state
-
-            if all(traj.is_valid() for traj in trial.trajectories.values()): 
-                print(trial.name)
-                # for body, traj in trial.trajectories.items(): 
-                #     print(body, traj.is_valid(), traj.clean_coords is None)
-
-                behavior = Behavior.Behavior(coords_set=trial.trajectories,
-                                    time_pad_off=trial.time_pad_off, 
-                                    cm_per_pixel=trial.cm_per_pixel)
-
-                # fig, ax = plt.subplots(figsize=(6, 6))
-                # behavior.draw_boxes(ax)
-                # ax.plot(behavior.centroid.coords["x"], behavior.centroid.coords["y"], color = "k")
-                # plt.show()
-
-                trial.update(behavior=behavior)
-
-            # compute metrics for each trajectories
-
-            for bodypart in BODYPARTS: 
-
-                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
-                
-                if not traj.is_valid(): 
-                    continue
-                
-                traj.clean_coords = traj.compute_instant_metrics(traj.clean_coords)
-                traj.scalar_metrics = traj.compute_scalar_metrics(traj.clean_coords)
-
-        self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
-                                            step="metrics")
-        self.trialgroup.save(self.paths.trials_metadata)
-
-
-    @process_time 
-    def run_analysis(self): 
-        print(f"""
-        =============== Analysis =================
-        Project name: {self.name}
-        Config directory: {self.config_dir}
-        ==============================================\n""")
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        custom_params = {"axes.spines.right": False, "axes.spines.top": False}
-        sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
-        
         analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
-        u.make_dir(analysis_dir)
-        self.trialgroup.crop_laser_period = True
-        self.trialgroup.remove_NOstim = True
+        output_dir = u.make_dir(analysis_dir / "trials_df")
 
-        traj_data = []
-
-        for trial in self.trialgroup.trials:
-            if not trial.is_valid():
-                continue
-
-            data = {info: val 
-                                for bp, stat in trial.trajectories.items()
-                                for  info, val in stat.to_dict().items()}
-            data["trial_name"] = trial.name
-            traj_data.append(data)
-
-
-        traj_data_df = pd.DataFrame(traj_data)
-        traj_data_df.to_csv("traj_data_df.csv")
-
-        # ___________________________________________________________________________________________
-        ################################# SUCCESS RATE / METADATA REPORT #############################
-
-
-
-        # self.trialgroup.trial_success_rate(u.make_path(analysis_dir, "trial_success_rate.png"))
-        # self.trialgroup.trajectories_success_rate(u.make_path(analysis_dir, "trajectories_success_rate.png"))
-
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"),
-        #                                   subfig_group="subject", 
-        #                                   groups=["laser_type"],
-        #                                   title=self.trialgroup.group_name)
-
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-        #                                   subfig_group="condition", 
-        #                                   groups=["subject", "laser_type", "laser_intensity"],
-        #                                   title=self.trialgroup.group_name)
-
-        # self.trialgroup.sunburst_metadata(output_dir=u.make_dir(analysis_dir / "metadata_sunburst"), 
-        #                                   subfig_group=None, 
-        #                                   groups=["subject", "is_valid", "failing_step"],
-        #                                   title=self.trialgroup.group_name)
-
-
-        # _________________________________________________________________________________
-        ################################# BEHAVIOR ANALYSIS #############################
-
-              
-        features = [
-                    "relative_t",
-                    "x", 
-                    "y",
-                    "area", 
-                    "centroid_direction", 
-                    "centroid_velocity", 
-                    "centroid_speed", 
-                    "centroid_acc", 
-                    "f3_sp_distance", 
-                    "f3_sp_angle", 
-                    "centroid_lever_dist"
+        dfs = [
+            "trial_success",
+            "bodypart_success",
+            # "behavior",
+            "kinematics",
+            "scalar",
         ]
 
-        # for feat in features: 
-        #     self.trialgroup.plot_tendency_beha_features(
-        #                         save_as=u.make_path(analysis_dir / "behavior" / "with_behavior_span", f"{feat}.png"),
-        #                         x="relative_t", y=feat, show_beha="spatial_behavior")
-            
-        #     self.trialgroup.plot_tendency_beha_features(
-        #                         save_as=u.make_path(analysis_dir / "behavior", f"{feat}.png"),
-        #                         x="relative_t", y=feat, show_beha=None)
-        
-        # self.trialgroup.lineplot_traj_centroid(save_as=u.make_path(analysis_dir / "behavior", f"centroid_traj.png"),) 
-
-
-        # for l_type in ["Beta","Conti"] : 
-        #     for l_intensity in ["low", "high"]: 
-        #         for l_state in ["LaserOn", "LaserOff"] : 
-
-        #             self.trialgroup.distri_feat_per_behavior(laser_type=l_type, laser_intensity=l_intensity, laser_state=l_state,
-        #                                                     save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", f"spatial_behavior_{l_type}_{l_intensity}_{l_state}.svg"),
-        #                                                     features_list=features)
-
-        #             self.trialgroup.distri_feat_per_behavior(data=df, behavior_varname="pred_state", laser_type=l_type, laser_intensity=l_intensity, laser_state=l_state,
-        #                                                     save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", f"HMM_pred_state_{l_type}_{l_intensity}_{l_state}.svg"),
-        #                                                     features_list=features)
-
-
-
-        # self.trialgroup.distri_feat_per_behavior(
-        #                                         save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", "spatial_behavior_state_all.svg"),
-        #                                         features_list=features)
-
-        # self.trialgroup.distri_feat_per_behavior(data=df, behavior_varname="pred_state", 
-        #                                         save_as=u.make_path(analysis_dir / "behavior" / "distri_feat_per_behavior", "HMM_pred_state_all.svg"),
-        #                                         features_list=features)
-
-        # ___________________________________________________________________________________________
-        ################################# BEHAVIOR EXPLORATION #############################
-
-
-        # HMM
-
-        # df = self.trialgroup.behavior_features_df(add_identity=True)
-        # Behavior.HMM_exploration(df, analysis_dir, init=False)
-
-
-        # # Keypoint MoSeq
-
-        # kpms_dir = u.make_dir(self.paths.data_root / "Keypoint-MoSeq")
-        # Behavior.Keypoint_MoSeq_exploration(kpms_dir, self.paths.model, self.paths.raw_videos)
-
-
-        # _________________________________________________________________________________
-        ################################# TRAJECTORY ANALYSIS #############################
-
-        ################################# ALL TRAJ
-        ################################# Timeseries
-
-
-        bodypart = "finger_3"
-        self.trialgroup.crop_laser_period = True
-        self.trialgroup.remove_NOstim = True
-
-        # self.trialgroup.buils_timeseries_df(init=False, save_as=analysis_dir / f"{bodypart}_timeseries_df.csv")
-
-        # trial = self.trialgroup.trials[1]
-
-        # behavior_obj = Behavior(trial.trajectories, trial.time_pad_off, trial.cm_per_pixel)
-        # self.trialgroup.lineplot_traj(save_as=analysis_dir / f"{bodypart}_all_traj_with_beha_zones.svg", Beha=behavior_obj)
-        # self.trialgroup.lineplot_traj(save_as=u.make_path(analysis_dir, f"{bodypart}_all_traj.svg"))
-        # self.trialgroup.lineplot_traj_per_indentity(save_as=analysis_dir / f"{bodypart}_traj_per_indentity.svg")
-
-        # timeseries_metric = [
-        #                     "x", 
-        #                     "y", 
-        #                     "instant_velocity", 
-        #                     "instant_speed", 
-        #                     "acc", 
-        #                     "signed_acc", 
-        #                     "lever_distance",
-        #                     "angle"
-        #                     ] 
-        # for val in timeseries_metric:
-        #     self.trialgroup.plot_tendency_metrics(
-        #         value=val,
-        #         save_as=u.make_path(analysis_dir / "tendency" / bodypart, f"{val}.svg"),
-        #         # show_units=True, 
-        #     )
-
-        
-
-
-        ################################# ALL TRAJ
-        ################################# Scalar series
-
-        # comparisons = [
-        #     # Conti vs Beta
-        #     ("Conti_LaserOff.low",  "Beta_LaserOff.low"),
-        #     ("Conti_LaserOff.high", "Beta_LaserOff.high"),
-        #     ("Conti_LaserOn.low",   "Beta_LaserOn.low"),
-        #     ("Conti_LaserOn.high",  "Beta_LaserOn.high"),
-
-        #     # Off vs On
-        #     ("Conti_LaserOff.low",  "Conti_LaserOn.low"),
-        #     ("Conti_LaserOff.high", "Conti_LaserOn.high"),
-        #     ("Beta_LaserOff.low",   "Beta_LaserOn.low"),
-        #     ("Beta_LaserOff.high",  "Beta_LaserOn.high"),
-
-        #     # low vs high
-        #     ("Beta_LaserOff.low",   "Beta_LaserOff.high"),
-        #     ("Beta_LaserOn.low",    "Beta_LaserOn.high"),
-        #     ("Conti_LaserOff.low",  "Conti_LaserOff.high"),
-        #     ("Conti_LaserOn.low",   "Conti_LaserOn.high"),
-        # ]
-
-        # comparisons_merge_Off = [
-        #     # conti vs beta
-        #     ("Conti.low",  "Beta.low"),
-        #     ("Conti.high", "Beta.high"),
-
-        #     # low vs high
-        #     ("LaserOff.high", "Conti.high"),
-        #     ("LaserOff.high",  "Beta.high"),
-        #     ("LaserOff.low",    "Beta.low"),
-        #     ("LaserOff.low",   "Conti.low"),
-
-        #     # condition high vs condition low
-        #     ("Conti.low", "Conti.high"),
-        #     ("Beta.low",  "Beta.high"),
-
-        #     # Beta high ON vs Conti low ON 
-        #     # (because conti low is suppose to be as damagefull as the beta high)
-        #     ("Beta.high", "Conti.low"),
-        #     ("Beta.low", "Conti.high")
-        # ]
-
-        # metrics = [
-        #     "avg_velocity_laser_period", 
-        #     "tortuosity_laser_period", 
-        #     "tortuosity_pad_to_lever", 
-        # ]
-
-        # for metric in metrics: 
-        #     self.trialgroup.violin_statistic(comparisons, metric=metric, 
-        #                                      save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}.svg"))
-        #     self.trialgroup.violin_statistic(comparisons_merge_Off, metric=metric,  merge_Off=True,
-        #                                      save_as=u.make_path(analysis_dir / "distribution" / bodypart, f"{metric}_merged_off.svg"),
-        #                                      order=["LaserOff", "Conti", "Beta"])
-
-
-        ################################# SINGLE TRAJ 
-        ################################# Timeseries
-
-        # i = 0
-        # for trial in tqdm(self.trialgroup.trials, desc="plotting timeseries"): 
-        #     if not trial.is_valid(): 
-        #         continue
-            
-        #     traj: TrajectoryDLC = trial.trajectories.get(bodypart)
-
-        #     if not traj.is_valid(): 
-        #         continue
-
-        #     fig, ax = plt.subplots()
-
-        #     ax = traj.plot_traj(traj.coords, ax, fig, color = "orange", label="raw")
-        #     ax = traj.plot_traj(traj.interpolated_coords, ax, fig, color = "green", label="interpolated")
-        #     ax = traj.plot_traj(traj.clean_coords, ax, fig, color = "blue", label="clean")
-
-
-        #     name = trial.name
-        #     title = name[:len(name)//2] + "\n" + name[len(name)//2:]
-
-        #     ax.set(
-        #         title=title,
-        #         xlabel="X position (cm)",
-        #         ylabel="Y position (cm)",
-        #     )
-        #     fig.savefig(u.make_path(analysis_dir / "traj_per_trial" / bodypart, f"{trial.name}.svg"))
-        #     plt.close()
-
-        #     i += 1
-        #     if i > 300 : 
-        #         break
-            # for val in timeseries_metric: 
-
-            #     traj.plot_tendency(value=val, time_pad_off=trial.time_pad_off,
-            #                        laser_state=trial.laser_state,
-            #                        group=trial.group,
-            #                        show_angle= val == "angle",
-            #                        save_as=u.make_path(analysis_dir / "tendency_per_trial" / bodypart / trial.name , f"{val}.svg"))
-
-    
+        for df in dfs: 
+            self.trialgroup.build_df(output_dir, df, load=False)
