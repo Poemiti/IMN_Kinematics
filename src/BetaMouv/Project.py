@@ -1,9 +1,9 @@
 # src/BetaMouv/Project.py
 
 from src.Base.Project import Project as BaseProject
+from src.Base.PathConfig import PathConfig
 from .Video import Video
 
-from .PathConfig import PathConfig
 from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
@@ -109,6 +109,7 @@ class Project(BaseProject):
 
 
     def build_metadata(self):
+        self.trialgroup.load_trials()
         print(f"""
         =============== Build Metadata ===============
         Project name: {self.name}
@@ -323,7 +324,7 @@ class Project(BaseProject):
 
     @process_time
     def run_prediction(self): 
-
+        self.trialgroup.load_trials()
         print(f"""
         ================= Prediction =================
         Project name: {self.name}
@@ -356,6 +357,7 @@ class Project(BaseProject):
             
     @process_time  
     def run_preprocessing(self):
+        self.trialgroup.load_trials()
         print(f"""
         =============== Preprocessing =================
         Project name: {self.name}
@@ -452,6 +454,7 @@ class Project(BaseProject):
 
     @process_time
     def run_validation(self):
+        self.trialgroup.load_trials()
         print(f"""  
         ================= Validation =================
         Project name: {self.name}
@@ -560,6 +563,7 @@ class Project(BaseProject):
 
     @process_time 
     def compute_metrics(self): 
+        self.trialgroup.load_trials()
         print(f"""
         ============== Compute Metrics ===============
         Project name: {self.name}
@@ -572,10 +576,10 @@ class Project(BaseProject):
         dfs = [
             "trial_success",
             "bodypart_success",
-            # "behavior",
+            "behavior",
             "kinematics",
             "scalar",
         ]
 
         for df in dfs: 
-            self.trialgroup.build_df(output_dir, df, load=False)
+            self.trialgroup.build_df(output_dir, df)

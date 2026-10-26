@@ -68,21 +68,19 @@ class TrialGroup(BaseTrialGroup):
     def __init__(self, filenames, condition):
         super().__init__(filenames, condition)
 
-        self._success_df = None
+        self._trial_success_df = None
         self._scalar_df = None
         self._timeseries_df = None
         self._bodypart_success_df = None
-        self._behavior_features_df = None
+        self._behavior_df = None
 
         self.crop_laser_period = False
         self.remove_NOstim = False
 
 
-    def build_df(self, output_dir: Path, kind: str, load=True) -> pd.DataFrame:
+    def build_df(self, output_dir: Path, kind: str) -> pd.DataFrame:
         """
         Build a dataframe of all valid trials, or load it if already saved.
-        If 'load=True', load or return df. Otherwise it just compute the df and saves it as a csv
-        kind :
             - trial_success
             - bodypart_success
             - behavior
@@ -91,9 +89,9 @@ class TrialGroup(BaseTrialGroup):
         """
         # Map each kind to the method (NO parentheses -> nothing is executed here)
         builders = {
-            "trial_success": self.success_df,
+            "trial_success": self.trial_success_df,
             "bodypart_success": self.bodypart_success_df,
-            "behavior": self.behavior_features_df,
+            "behavior": self.behavior_df,
             "kinematics": self.timeseries_df,
             "scalar": self.scalar_df,
         }
@@ -107,17 +105,21 @@ class TrialGroup(BaseTrialGroup):
         # If it exists, load it
         if output_path.exists():
             print(f"\n'{kind}' already exist: '{output_path}'")
-            if not load :
-                return 
-
             print("Loading...")
-            if kind in ["kinematics", "scalar"]: 
-                return pd.read_csv(output_path, header=[0, 1])
-            return pd.read_csv(output_path)
 
+            if kind in ["kinematics", "scalar"]: 
+                df = pd.read_csv(output_path, header=[0, 1])
+            else : 
+                df = pd.read_csv(output_path)
+
+            setattr(self, f"_{kind}_df", df)
+            return df
+
+        # or compute it
         print(f"\nComputing '{kind}'")
         df = builders[kind]()
         df.to_csv(output_path, index=False)
+        setattr(self, f"_{kind}_df", df)
 
         # Backup
         stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -127,17 +129,15 @@ class TrialGroup(BaseTrialGroup):
         df.to_csv(backup, index=False)
 
         print(f"\nSaved '{kind}': {output_path}\nbackup: {backup}")
-
-        if load: 
-            return df
+        return df
 
 
-    def success_df(self) -> pd.DataFrame:
+    def trial_success_df(self) -> pd.DataFrame:
         """One row per trial, including failures — for QC / yield figures
         (e.g. success rate by condition, why trials were excluded)."""
 
-        if self._success_df is not None:
-            return self._success_df
+        if self._trial_success_df is not None:
+            return self._trial_success_df
         
         records = []
 
@@ -277,11 +277,11 @@ class TrialGroup(BaseTrialGroup):
         return res
 
 
-    def behavior_features_df(self) -> pd.DataFrame: 
-        if self._behavior_features_df is None:
+    def behavior_df(self) -> pd.DataFrame: 
+        if self._behavior_df is None:
             trial_dict = []
 
-            for trial in tqdm(self.trials, desc="Building behavior_features_df"):
+            for trial in tqdm(self.trials, desc="Building behavior_df"):
                 if not trial.is_valid() or trial.laser_intensity == "incompatible":
                     continue
  
@@ -293,6 +293,9 @@ class TrialGroup(BaseTrialGroup):
                 traj_set = self.load_valid_tracking(trial, bodyparts)
 
                 if traj_set is None: # = no valid trajectories
+                    continue
+
+                if not all(stat["is_valid"] == True for bp, stat in trial.trajectories.items()): 
                     print(trial.name)
                     continue
 
@@ -330,13 +333,13 @@ class TrialGroup(BaseTrialGroup):
     ####################### plotting methods ###########################
 
     def trial_success_rate(self, save_as, show: bool = False): 
-        return self.success_rate(self.success_df(), None, save_as, show)
+        return self._countplot_success_rate(self.trial_success_df(), None, save_as, show)
 
     def trajectories_success_rate(self, save_as, show: bool = False): 
-            return self.success_rate(self.bodypart_success_df(), "bodypart", save_as, show)
+            return self._countplot_success_rate(self.bodypart_success_df(), "bodypart", save_as, show)
 
 
-    def success_rate(self, df, col, save_as, show: bool = False):
+    def _countplot_success_rate(self, df, col, save_as, show: bool = False):
         """Display success rate and failure reasons per stage, and save the report."""
 
         g = sns.catplot(
@@ -346,40 +349,17 @@ class TrialGroup(BaseTrialGroup):
             hue="success", palette=BOOL_PALETTE,
             sharey=False, height=4, aspect=3,
         )
+
+        # add count on bars
+        for ax in g.axes.flat: 
+            for container in ax.containers: 
+                ax.bar_label(container, fmt="%d", padding=3)
         
         # g.set_xticklabels(rotation=45, ha="right")
         g.set_axis_labels("Number of trials", "")
         g.set_titles(row_template="{row_name}")
-        g.figure.suptitle(f"Success rate by stage - n_trials: {len(self.trials)}\n{self.group_name}")
+        g.figure.suptitle(f"Success rate by stage - n_trials: {len(df['name'].unique())}\n{self.group_name}")
         g.figure.subplots_adjust(top=0.90)
-
-        # Annotate each bar with its % of that stage's total trial count
-        for stage, ax in zip(g.row_names, g.axes.flat):
-            stage_total = (df["stage"] == stage).sum()
-
-            if stage_total == 0:
-                continue
-
-            for bar in ax.patches:
-                width = bar.get_width()
-
-                if width <= 0:
-                    continue
-
-                rate = 100 * width / stage_total
-
-                ax.annotate(
-                    f"{rate:.1f}%",
-                    xy=(
-                        width,
-                        bar.get_y() + bar.get_height() / 2,
-                    ),
-                    xytext=(5, 0),
-                    textcoords="offset points",
-                    ha="left",
-                    va="center",
-                    fontsize=12,
-                )
 
         g.figure.savefig(save_as, bbox_inches="tight")
         if show: 
@@ -402,7 +382,7 @@ class TrialGroup(BaseTrialGroup):
 
  
     def lineplot_traj_centroid(self, save_as, Beha = None): 
-        data = self.behavior_features_df()
+        data = self.behavior_df()
         return self._lineplot_traj(data=data, save_as=save_as, Beha=Beha,
                     title=f"{self.group_name}\n centroid, n_trial={data['name'].nunique()}")
 
@@ -565,17 +545,16 @@ class TrialGroup(BaseTrialGroup):
 
 
     def plot_tendency_beha_features(self, save_as: str, x="t", y="area", show_units: bool = False, show_beha: str = "spatial_behavior"): 
-        data = self.behavior_features_df()
-        data.to_csv("data.csv")
-        return self.plot_tendency(data=data, save_as=save_as, x=x, y=y, show_units=show_units, show_beha=show_beha,
+        data = self.behavior_df()
+        return self._lineplot_tendency(data=data, save_as=save_as, x=x, y=y, show_units=show_units, show_beha=show_beha,
                                   title=f"{y} - n trials: {len(data.groupby('name'))}",)
 
     def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False, show_beha: str = "spatial_behavior"): 
         data = self.timeseries_df(bodypart)
-        return self.plot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units, show_beha=show_beha,
+        return self._lineplot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units, show_beha=show_beha,
                                   title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
 
-    def plot_tendency(self, data, title, save_as: str, x="t", y="area", show_units: bool = False, show_beha: str="spatial_behavior"):
+    def _lineplot_tendency(self, data, title, save_as: str, x="t", y="area", show_units: bool = False, show_beha: str="spatial_behavior"):
 
 
         g = sns.FacetGrid(
@@ -709,7 +688,7 @@ class TrialGroup(BaseTrialGroup):
         import plotly.express as px
         from plotly.subplots import make_subplots
 
-        data = self.success_df()
+        data = self.trial_success_df()
         data = data.drop_duplicates(subset="name", keep="first")
 
         filename = "_".join(groups)
@@ -799,7 +778,7 @@ class TrialGroup(BaseTrialGroup):
                                 features_list: list =  ["x", "y", "area"]) : 
 
         if data is None: 
-            data = self.behavior_features_df()
+            data = self.behavior_df()
 
         if laser_state and laser_intensity and laser_type : 
             data = data.loc[(data["laser_type"] == laser_type) & 

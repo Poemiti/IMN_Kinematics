@@ -35,7 +35,7 @@ class Behavior:
         self.cm_per_pixel = cm_per_pixel
 
         finger3_traj: TrajectoryDLC = self.coords_set["finger_3"]
-        self.reach_bottom = finger3_traj.clean_coords.loc[finger3_traj.clean_coords["t"] == self.time_pad_off, "y"].item()
+        self.reach_bottom = finger3_traj.coords.loc[finger3_traj.coords["t"] == self.time_pad_off, "y"].item()
 
         # constants in cm and cartesian plane
         self.LEVER_POS = finger3_traj._point_to_scaled_cartesian(cfg["lever_position"][0], cfg["lever_position"][1])
@@ -101,8 +101,8 @@ class Behavior:
         if coords_set is None:
             coords_set = self.coords_set
 
-        bodypart1 = coords_set[bp1].clean_coords
-        bodypart2 = coords_set[bp2].clean_coords
+        bodypart1 = coords_set[bp1].coords
+        bodypart2 = coords_set[bp2].coords
 
         dx = bodypart2["x"].to_numpy() - bodypart1["x"].to_numpy()
         dy = bodypart2["y"].to_numpy() - bodypart1["y"].to_numpy()
@@ -120,8 +120,8 @@ class Behavior:
         if coords_set is None:
             coords_set = self.coords_set
 
-        bodypart1 = coords_set[bp1].clean_coords
-        bodypart2 = coords_set[bp2].clean_coords
+        bodypart1 = coords_set[bp1].coords
+        bodypart2 = coords_set[bp2].coords
 
         dx = bodypart2["x"].to_numpy() - bodypart1["x"].to_numpy()
         dy = bodypart2["y"].to_numpy() - bodypart1["y"].to_numpy()
@@ -134,11 +134,11 @@ class Behavior:
         if coords_set is None:
             coords_set = self.coords_set
         
-        bodypart1 = coords_set[bp1].clean_coords
-        bodypart2 = coords_set[bp2].clean_coords
-        bodypart3 = coords_set[bp3].clean_coords
+        bodypart1 = coords_set[bp1].coords
+        bodypart2 = coords_set[bp2].coords
+        bodypart3 = coords_set[bp3].coords
 
-        print(len(bodypart1), len(bodypart2), len(bodypart3), len(bodypart1["t"]))
+        # print(len(bodypart1), len(bodypart2), len(bodypart3), len(bodypart1["t"]))
 
 
         centroid_x = (bodypart1["x"] + bodypart2["x"] + bodypart3["x"]) / 3
@@ -158,9 +158,9 @@ class Behavior:
         if coords_set is None:
             coords_set = self.coords_set
 
-        c1 = coords_set[bp1].clean_coords
-        c2 = coords_set[bp2].clean_coords
-        c3 = coords_set[bp3].clean_coords
+        c1 = coords_set[bp1].coords
+        c2 = coords_set[bp2].coords
+        c3 = coords_set[bp3].coords
 
         return  0.5 * abs(c1["x"]*c2["y"] + c2["x"]*c3["y"] + c3["x"]*c1["y"] - c1["y"]*c2["x"] - c2["y"]*c3["x"] - c3["y"]*c1["x"])
 
@@ -171,12 +171,12 @@ class Behavior:
     #     bp_distance: np.array = self.bodypart_distance()
     #     finger3_traj: Trajectory = self.coords_set["finger_3"]
     #     softpad_traj: Trajectory = self.coords_set["soft_pad"]
-    #     t = self.coords_set["finger_3"].clean_coords["t"]
+    #     t = self.coords_set["finger_3"].coords["t"]
 
     #     fig, ax = plt.subplots(2, 1, figsize=[8, 11])
-    #     ax[0] = finger3_traj.plot_traj(finger3_traj.clean_coords, ax[0], fig, "red")
-    #     ax[0] = softpad_traj.plot_traj(softpad_traj.clean_coords, ax[0], fig, "orange")
-    #     # self.coords_set["finger_3"].show_traj(self.coords_set["finger_3"].clean_coords)
+    #     ax[0] = finger3_traj.plot_traj(finger3_traj.coords, ax[0], fig, "red")
+    #     ax[0] = softpad_traj.plot_traj(softpad_traj.coords, ax[0], fig, "orange")
+    #     # self.coords_set["finger_3"].show_traj(self.coords_set["finger_3"].coords)
     #     ax[0].set_title("finger3 (red) - soft pad (orange)")
     #     ax[0].set_ylabel("y (cm)")
     #     ax[0].set_xlabel("x (cm)")

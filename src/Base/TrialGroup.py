@@ -18,15 +18,23 @@ class TrialGroup:
         self.condition = condition
 
         self.keep_val = []
-        for condition, criteria in self.condition.items():
+        for cond, criteria in self.condition.items():
             self.keep_val.extend(value for value, keep in criteria.items() if keep)
         self.group_name = "_".join(self.keep_val)
         print("\n",self.group_name)
 
-        self.keep_joblib = []
-        self.trials: list[BaseTrial] = self._filter_joblib()
+        self.keep_joblib: list[str] = None
+        self.trials: list[BaseTrial] = None
 
-        # display output
+        
+
+    def load_trials(self) -> None : 
+        """Read joblib files and save trials in self.trials.
+        Display the number of joblib open and total number of trials"""
+        if self.trials is not None: 
+            return
+        self.keep_joblib = []
+        self.trials = self._filter_joblib()
 
         print(f"--> {len(self.keep_joblib)}/{len(self.filenames)} FILES LOADED")
         print(f"--> {len(self.trials)} trials")
