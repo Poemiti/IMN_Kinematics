@@ -151,15 +151,3 @@ class Trial(BaseTrial):
         else : 
             self.set_success(stage="task", success=True, reason = "Successful, paw lifted")
 
-
-    # saving methods 
-
-    # def trajectory_outcomes_dict(self) -> dict:
-    #     """Just the pass/fail per bodypart, yaml-safe — no coordinate data."""
-    #     return {bp: entry["outcome"].to_dict() 
-    #             for bp, entry in self.trajectories.items()}
-
-    # def to_yaml_dict(self) -> dict:
-    #     data = super().to_yaml_dict()  # everything in YAML_FIELDS, normally serialized
-    #     data["trajectory_outcomes"] = self.trajectory_outcomes_dict()
-    #     return data
