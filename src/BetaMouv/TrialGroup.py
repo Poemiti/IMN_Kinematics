@@ -5,7 +5,8 @@ from src.Base.TrialGroup import TrialGroup as BaseTrialGroup
 from src.BetaMouv.Statistics import Statistics
 
 from .Trial import Trial
-from .Trajectory import TrajectoryDLC
+from .Trajectory import TrajectoryDLC, DLCTracking
+from .Behavior import Behavior
 from statannotations.Annotator import Annotator
 
 import pandas as pd
@@ -14,6 +15,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np 
 from pathlib import Path
+from datetime import datetime
 
 
 custom_params = {"axes.spines.right": False, "axes.spines.top": False}
@@ -75,165 +77,253 @@ class TrialGroup(BaseTrialGroup):
         self.crop_laser_period = False
         self.remove_NOstim = False
 
-    def buils_timeseries_df(self, save_as, bodypart: str = "finger_3", init: bool = True) -> pd.DataFrame:
-        if init: 
-            self._timeseries_df = self.timeseries_df(bodypart)
-            self._timeseries_df.to_csv(save_as)
-            return 
-              
-        if save_as.exists() : 
-            print(f"Loading timeseries_df from : '{save_as}'")
-            self._timeseries_df = pd.read_csv(save_as)
-            return
 
-        self._timeseries_df = self.timeseries_df(bodypart)
-        self._timeseries_df.to_csv(save_as)
+    def build_df(self, output_dir: Path, kind: str, load=True) -> pd.DataFrame:
+        """
+        Build a dataframe of all valid trials, or load it if already saved.
+        If 'load=True', load or return df. Otherwise it just compute the df and saves it as a csv
+        kind :
+            - trial_success
+            - bodypart_success
+            - behavior
+            - kinematics
+            - scalar
+        """
+        # Map each kind to the method (NO parentheses -> nothing is executed here)
+        builders = {
+            "trial_success": self.success_df,
+            "bodypart_success": self.bodypart_success_df,
+            "behavior": self.behavior_features_df,
+            "kinematics": self.timeseries_df,
+            "scalar": self.scalar_df,
+        }
+
+        if kind not in builders:
+            raise ValueError(f"Unknown kind '{kind}'. Choose from {list(builders)}")
+
+        output_dir = Path(output_dir)
+        output_path = output_dir / f"{kind}.csv"
+
+        # If it exists, load it
+        if output_path.exists():
+            print(f"\n'{kind}' already exist: '{output_path}'")
+            if not load :
+                return 
+
+            print("Loading...")
+            if kind in ["kinematics", "scalar"]: 
+                return pd.read_csv(output_path, header=[0, 1])
+            return pd.read_csv(output_path)
+
+        print(f"\nComputing '{kind}'")
+        df = builders[kind]()
+        df.to_csv(output_path, index=False)
+
+        # Backup
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_dir = output_dir / "backup"
+        backup_dir.mkdir(exist_ok=True)
+        backup = backup_dir / f"{kind}_{stamp}.csv"
+        df.to_csv(backup, index=False)
+
+        print(f"\nSaved '{kind}': {output_path}\nbackup: {backup}")
+
+        if load: 
+            return df
 
 
     def success_df(self) -> pd.DataFrame:
         """One row per trial, including failures — for QC / yield figures
         (e.g. success rate by condition, why trials were excluded)."""
 
-        if self._success_df is None:
-            records = []
+        if self._success_df is not None:
+            return self._success_df
+        
+        records = []
 
-            for trial in self.trials:
+        for trial in self.trials:
 
-                for stage, outcome in trial.trial_outcomes.items():
-                    records.append(trial.identity() | {
-                            "stage": stage,
-                            "success": outcome.success,
-                            "reason": outcome.reason,
-                            "is_valid": "valid" if trial.is_valid() else "not_valid",
-                            "failing_step": trial.failure()                        
-                            })
+            for stage, outcome in trial.trial_outcomes.items():
+                records.append(trial.identity() | {
+                        "stage": stage,
+                        "success": outcome.success,
+                        "reason": outcome.reason,
+                        "is_valid": "valid" if trial.is_valid() else "not_valid",
+                        "failing_step": trial.failure()                        
+                        })
 
-            self._success_df = pd.DataFrame(records)
+        res = pd.DataFrame(records)
+        self._success_df = res
 
-
-        return self._success_df
+        return res
 
 
     def bodypart_success_df(self) -> pd.DataFrame:
         """One row per (trial, bodypart, stage) — for per-bodypart QC figures."""
 
-        if self._bodypart_success_df is None:
-            records = []
-            for trial in self.trials:
-                for bodypart, traj in trial.trajectories.items():
-                    for stage, outcome in traj.stage_outcomes.items():
+        if self._bodypart_success_df is not None:
+            return self._bodypart_success_df
+
+        records = []
+        for trial in self.trials:
+            for bodypart, stat in trial.trajectories.items():
+                    for stage, outcome in stat["stage_outcomes"].items():
 
                         records.append(trial.identity() | {
                             "bodypart": bodypart,
                             "stage": stage,
-                            "success": outcome.success,
-                            "reason": outcome.reason,
+                            "success": outcome["success"],
+                            "reason": outcome["reason"],
                         })
-                        
-            self._bodypart_success_df = pd.DataFrame(records)
-        return self._bodypart_success_df
+
+        res = pd.DataFrame(records)
+        self._bodypart_success_df = res
+            
+        return res
 
 
-    def scalar_df(self, bodypart: str = "finger_3") -> pd.DataFrame:
+    def scalar_df(self) -> pd.DataFrame:
         """One row per trial — for distributions/scatter (avg velocity, tortuosity, ...)."""
 
-        if self._scalar_df is None:
-            records = []
+        if self._scalar_df is not None:
+            return self._scalar_df
+    
+        trial_dfs = []
 
-            for trial in tqdm(self.trials, desc="Building scalar_df"):
-                if not trial.is_valid() or trial.laser_intensity == "incompatible":
+        for trial in tqdm(self.trials, desc="Building scalar_df"):
+            if not trial.is_valid() or trial.laser_intensity == "incompatible":
+                continue
+
+            if self.remove_NOstim: 
+                if trial.laser_type == "NOstim": 
                     continue
 
-                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
+            bodyparts = list(trial.trajectories.keys())
+            traj_set = self.load_valid_tracking(trial, bodyparts)
 
-                if not traj.is_valid(): 
-                    continue
+            if traj_set is None: # = no valid trajectories
+                continue
 
-                if self.remove_NOstim: 
-                    if trial.laser_type == "NOstim": 
-                        continue
+            per_bp = {}
+            for bp in traj_set:
+                traj: TrajectoryDLC = traj_set[bp]
+                
+                if self.crop_laser_period:
+                    traj = traj.crop_xy(trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)  # adapt to your API
+                
+                d: dict[str, float] = traj.compute_scalar_metrics()
+                per_bp[bp] = pd.DataFrame([d]) 
 
-                records.append(trial.identity() | traj.scalar_metrics)
+            meta = pd.DataFrame({("trial", col): [val] for col, val in trial.identity().items()})
+            metrics = pd.concat(per_bp, axis=1)
 
-            self._scalar_df = pd.DataFrame(records)
+            trial_dfs.append(pd.concat([meta, metrics], axis=1))
 
-        return self._scalar_df
+        res = pd.concat(trial_dfs, axis=0, ignore_index=True)
+        res.columns.names = ["bodypart", "metric"]
+        self._scalar_df = res
+
+        return res
 
 
-    def timeseries_df(self, bodypart: str = "finger_3") -> pd.DataFrame:
+    def timeseries_df(self) -> pd.DataFrame:
         """Many rows per trial (one per frame/timestamp) : for plots over time."""
 
-        if self._timeseries_df is None:
-            frames = []
+        if self._timeseries_df is not None:
+            return self._timeseries_df
+            
+        trial_dfs = []
 
-            for trial in tqdm(self.trials, desc="Building timeseries_df"):
-                if not trial.is_valid() or trial.laser_intensity == "incompatible":
+        for trial in tqdm(self.trials, desc="Building timeseries_df"):
+            if not trial.is_valid() or trial.laser_intensity == "incompatible":
+                continue
+
+            if self.remove_NOstim: 
+                if trial.laser_type == "NOstim": 
                     continue
 
-                traj: TrajectoryDLC = trial.trajectories.get(bodypart)
+            bodyparts = list(trial.trajectories.keys())
+            traj_set = self.load_valid_tracking(trial, bodyparts)
 
-                if not traj.is_valid(): 
-                    continue
+            if traj_set is None: # = no valid trajectories
+                continue
 
-                if self.remove_NOstim: 
-                    if trial.laser_type == "NOstim": 
-                        continue
-
-                df = traj.clean_coords
+            per_bp = {}
+            for bp in traj_set: 
+                df = traj_set[bp].compute_instant_metrics()
 
                 if self.crop_laser_period: 
-                    df = traj.crop_xy(traj.clean_coords, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
+                    df = df.crop_xy(df, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
+                
+                per_bp[bp] = df.reset_index(drop=True)
 
-                for col, val in trial.identity().items():
-                    df[col] = [val] * len(df)
+            # shared time axis (assumes all bodyparts share the same frames)
+            t = next(iter(per_bp.values()))["t"]
+            assert all(len(d) == len(t) for d in per_bp.values()), f"length mismatch in {trial.name}"
 
-                df["index_order"] = range(len(df))
-                df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
+            meta = pd.DataFrame({("trial", col): [val] * len(t)
+                                for col, val in trial.identity().items()})
+            meta[("trial", "t")] = t.values
+            meta[("trial", "relative_t")] = (t - trial.time_pad_off).round(3).values
+            meta[("trial", "index_order")] = range(len(t))
 
-                frames.append(df)
+            metrics = pd.concat({bp: d.drop(columns="t") for bp, d in per_bp.items()}, axis=1)
+            trial_dfs.append(pd.concat([meta, metrics], axis=1))
 
-            self._timeseries_df = pd.concat(frames, ignore_index=True)
+        res = pd.concat(trial_dfs, axis=0, ignore_index=True)
+        res.columns.names = ["bodypart", "metric"]
+        self._timeseries_df = res
 
-        return self._timeseries_df
+        return res
 
 
-    def behavior_features_df(self, add_identity: bool = True) -> pd.DataFrame: 
+    def behavior_features_df(self) -> pd.DataFrame: 
         if self._behavior_features_df is None:
-            frames = []
-            n = 0
-
+            trial_dict = []
 
             for trial in tqdm(self.trials, desc="Building behavior_features_df"):
                 if not trial.is_valid() or trial.laser_intensity == "incompatible":
-                    continue
-
-                if trial.behavior is None or trial.name == "Rat_#517Ambidexter_20240527_Session2_BetaMT300_1mW_Laser3070_RightHemiCHR_L1L25050_C001H001S0001_clip_58": 
                     continue
  
                 if self.remove_NOstim : 
                     if trial.laser_type == "NOstim": 
                         continue
 
-                df = trial.behavior.features
-                traj = trial.trajectories["finger_3"]
+                bodyparts = list(trial.trajectories.keys())
+                traj_set = self.load_valid_tracking(trial, bodyparts)
 
-                if self.crop_laser_period: 
-                    df = traj.crop_xy(df, trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)
+                if traj_set is None: # = no valid trajectories
+                    print(trial.name)
+                    continue
 
-                if add_identity: 
-                    for col, val in trial.identity().items():
-                        df[col] = [val] * len(df)
+                behavior = Behavior(coords_set=traj_set,
+                                    time_pad_off=trial.time_pad_off, 
+                                    cm_per_pixel=trial.cm_per_pixel)
+
+                df = behavior.features
+                for col, val in trial.identity().items():
+                    df[col] = [val] * len(df)
 
                 df["index_order"] = range(len(df))
                 df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
-                df["id"] = n
-                n+=1
 
-                frames.append(df)
+                trial_dict.append(df)
 
-            self._behavior_features_df = pd.concat(frames, ignore_index=True)
+            self._behavior_features_df = pd.concat(trial_dict, ignore_index=True)
 
         return self._behavior_features_df
+
+
+    def load_valid_tracking(self, trial, bodyparts, only_valid=True): 
+        tracking = DLCTracking(path=trial.clean_pred_path,
+                                view=trial.camera_view, 
+                                bodyparts=bodyparts,
+                                time_pad_off=trial.time_pad_off,
+                                cm_per_pixel=trial.cm_per_pixel,
+                                shift=trial.camera_shift, 
+                                status=trial.trajectories)
+        return tracking.load(only_valid=only_valid)
+
     
 
     
