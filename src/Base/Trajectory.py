@@ -434,7 +434,8 @@ class DLCTracking:
         data = {bp: traj.coords.set_index("t")
                 for bp, traj in self.coords_set.items()}
 
-        df = pd.concat({self.scorer: pd.concat(data, axis=1)}, axis=1)
+        df = pd.concat({self.scorer: pd.concat(data, axis=1)}, axis=1, 
+                       names=["scorer", "bodyparts", "coords"])
         df.to_csv(save_as)
 
 

@@ -379,8 +379,6 @@ class Project(BaseProject):
         for trial in tqdm(self.trialgroup.trials, desc="Preprocessing"):
             if not trial.is_valid():
                 continue
-            trial.update(pred_path = Path(trial.pred_path))
-            trial.update(clean_pred_path = trial.pred_path.parent / f"clean_{trial.name}.csv")
 
             tracking = DLCTracking(path=trial.pred_path,
                                         view=trial.camera_view, 

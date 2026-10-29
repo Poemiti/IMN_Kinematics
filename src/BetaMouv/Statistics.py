@@ -17,9 +17,9 @@ class Statistics:
 
         self.metric = metric
 
-        self.data = data
+        self.data = data 
         self.data["laser_group"] = data["laser_cond"] + "." + data["laser_intensity"]
-        
+
 
 
     def kruskal_test(self, group):

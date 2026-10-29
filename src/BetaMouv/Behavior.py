@@ -7,6 +7,7 @@ from src.Base.Trajectory import Trajectory
 from src.BetaMouv.Trajectory import TrajectoryDLC
 
 import src.utils as u
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -251,7 +252,7 @@ def HMM(data: pd.DataFrame, feature_cols: list[str], n_state: int) -> pd.DataFra
     from sklearn.preprocessing import StandardScaler
 
     X = StandardScaler().fit_transform(data[feature_cols].to_numpy())
-    lengths = data.groupby("id", sort=True).size().to_numpy()   # frames per trial
+    lengths = data.groupby("name", sort=True).size().to_numpy()   # frames per trial
     assert lengths.sum() == len(X)
 
     # several random starts, keep the best (EM finds local optima)
@@ -275,16 +276,18 @@ def HMM(data: pd.DataFrame, feature_cols: list[str], n_state: int) -> pd.DataFra
 
 
 
-def HMM_exploration(data, analysis_dir, init: bool = True): 
+def HMM_exploration(data, analysis_dir, load: Path | None = None): 
     """Run full HMM with variing parameters (n_state, features...)
     init = True run the HMM, set it to False to load precomputed data"""
 
     for n in range(4, 9): 
+        output_dir = analysis_dir / "behavior" / "HMM" / f"{n}_componant"
+        save_path = u.make_path(output_dir, "HMM_results.csv")
     
-        if init : # run full computation
+        if load is None : # run full computation
 
             # rows must be contiguous per trial and ordered in time within a trial
-            data = data.sort_values(["id", "relative_t"]).reset_index(drop=True)
+            data = data.sort_values(["name", "relative_t"]).reset_index(drop=True)
 
             behavior_num = {"none": 0, "reach": 1, "open": 2, "grasp": 3, "press": 4}
             data["spatial_state"] = data["spatial_behavior"].map(behavior_num)
@@ -309,7 +312,7 @@ def HMM_exploration(data, analysis_dir, init: bool = True):
                         "spatial_state"
             ]
 
-            data = data.sort_values(["id", "relative_t"]).reset_index(drop=True)
+            data = data.sort_values(["name", "relative_t"]).reset_index(drop=True)
 
             # 1) the 6 NaNs in x/y: see where they are
             bad = data[data["x"].isna()]
@@ -320,23 +323,20 @@ def HMM_exploration(data, analysis_dir, init: bool = True):
             data = data.dropna(subset=feature_cols).reset_index(drop=True)
 
             print(f"\nFitting best HMM: n_componant = {n}")
-            output_dir = analysis_dir / "behavior" / "HMM" / f"{n}_componant"
         
             data = HMM(data, feature_cols, n)
-            
-            save_path = u.make_path(output_dir, "HMM_results.csv")
             data.to_csv(save_path)
 
         else :   # load data directly
             data = pd.read_csv(save_path)
-            print("Loading:", save_path)
+            print("Loading:", load)
 
         print("Display matrix")
 
         order = ["none", "reach", "open", "grasp", "press"]
 
         # trials in which a (true, pred) pair occurs at least once
-        pairs = data[["id", "spatial_behavior", "pred_state"]].drop_duplicates()
+        pairs = data[["name", "spatial_behavior", "pred_state"]].drop_duplicates()
         ct_trials = pd.crosstab(pairs["spatial_behavior"], pairs["pred_state"]).reindex(order)
 
         # frames, normalised per true phase (rows sum to 1)

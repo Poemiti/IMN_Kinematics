@@ -132,6 +132,51 @@ class TrialGroup(BaseTrialGroup):
         return df
 
 
+    def clean_df(self, df: pd.DataFrame) -> pd.DataFrame: 
+        """Check 'remove_NOstim' flag and 'crop_laser_period' flag
+        remove_NOstim : remove trials with the NOstim condition
+        crop_laser_period : crop trial timeseries around the laser period 
+        (0.1 sec before pad off --> 0.1 after end of the opto stim)"""
+
+        has_2_levels = df.columns.nlevels == 2
+
+        if self.remove_NOstim and has_2_levels:
+            df = df[df["trial"]["laser_type"] != "NOstim"]
+        else : 
+            df = df[df["laser_type"] != "NOstim"]
+
+        if self.crop_laser_period :
+            if has_2_levels :
+                if ("trial", "t") in df.columns :
+                    t = df["trial"]["t"]
+                    pad_off = df["trial"]["time_pad_off"]
+                else:
+                    return df
+                
+            else: 
+                t = df["t"]
+                pad_off = df["time_pad_off"]
+
+            df = df[
+                (t >= pad_off - 0.1) &
+                (t <= pad_off + 0.4)
+            ]
+            
+        return df
+
+    
+    def extract_bodypart_data(self, df: pd.MultiIndex, bodypart) -> pd.DataFrame: 
+        """Take a Multindex and return a clean dataframe for the specified bodypart"""
+        if bodypart not in df.columns.get_level_values(0):
+            raise KeyError(f"Body part '{bodypart}' not found in DataFrame")
+        
+        bodypart_data = df[bodypart]
+        mask = bodypart_data.notna().all(axis=1)
+
+        return pd.concat([df["trial"], bodypart_data], axis=1).loc[mask]
+
+
+
     def trial_success_df(self) -> pd.DataFrame:
         """One row per trial, including failures — for QC / yield figures
         (e.g. success rate by condition, why trials were excluded)."""
@@ -186,7 +231,7 @@ class TrialGroup(BaseTrialGroup):
         """One row per trial — for distributions/scatter (avg velocity, tortuosity, ...)."""
 
         if self._scalar_df is not None:
-            return self._scalar_df
+            return self.clean_df(self._scalar_df)
     
         trial_dfs = []
 
@@ -205,13 +250,13 @@ class TrialGroup(BaseTrialGroup):
                 continue
 
             per_bp = {}
-            for bp in traj_set:
+            for bp in traj_set: 
                 traj: TrajectoryDLC = traj_set[bp]
+                d: dict[str, float] = traj.compute_scalar_metrics()
                 
                 if self.crop_laser_period:
                     traj = traj.crop_xy(trial.time_pad_off - 0.1, trial.time_pad_off + 0.4)  # adapt to your API
                 
-                d: dict[str, float] = traj.compute_scalar_metrics()
                 per_bp[bp] = pd.DataFrame([d]) 
 
             meta = pd.DataFrame({("trial", col): [val] for col, val in trial.identity().items()})
@@ -230,19 +275,7 @@ class TrialGroup(BaseTrialGroup):
         """Many rows per trial (one per frame/timestamp) : for plots over time."""
 
         if self._kinematics_df is not None:
-            data = self._kinematics_df
-            if self.remove_NOstim:
-                data = data[data["trial"]["laser_type"] != "NOstim"]
-
-            if self.crop_laser_period:
-                t = data["trial"]["relative_t"]
-                laser_on = data["trial"]["time_laser_on"]
-
-                data = data[
-                    (t >= laser_on - 0.1) &
-                    (t <= laser_on + 0.325)
-                ]
-            return data
+            return self.clean_df(self._kinematics_df)
             
         trial_dfs = []
 
@@ -290,43 +323,47 @@ class TrialGroup(BaseTrialGroup):
 
 
     def behavior_df(self) -> pd.DataFrame: 
-        if self._behavior_df is None:
-            trial_dict = []
-            n=0
 
-            for trial in tqdm(self.trials, desc="Building behavior_df"):
-                if not trial.is_valid() or trial.laser_intensity == "incompatible":
-                    continue
- 
-                if self.remove_NOstim : 
-                    if trial.laser_type == "NOstim": 
-                        continue
+        if self._behavior_df is not None:
+            return self.clean_df(self._behavior_df)
+        
+        trial_dict = []
+        n=0
 
-                bodyparts = list(trial.trajectories.keys())
-                traj_set = self.load_valid_tracking(trial, bodyparts)
+        for trial in tqdm(self.trials, desc="Building behavior_df"):
+            if not trial.is_valid() or trial.laser_intensity == "incompatible":
+                continue
 
-                if traj_set is None: # = no valid trajectories
+            if self.remove_NOstim : 
+                if trial.laser_type == "NOstim": 
                     continue
 
-                if not all(stat["is_valid"] == True for bp, stat in trial.trajectories.items()): 
-                    n+=1
-                    continue
+            bodyparts = list(trial.trajectories.keys())
+            traj_set = self.load_valid_tracking(trial, bodyparts)
 
-                behavior = Behavior(coords_set=traj_set,
-                                    time_pad_off=trial.time_pad_off, 
-                                    cm_per_pixel=trial.cm_per_pixel)
+            if traj_set is None: # = no valid trajectories
+                continue
 
-                df = behavior.features
-                for col, val in trial.identity().items():
-                    df[col] = [val] * len(df)
+            if not all(stat["is_valid"] == True for bp, stat in trial.trajectories.items()): 
+                n+=1
+                continue
 
-                df["index_order"] = range(len(df))
-                df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
+            behavior = Behavior(coords_set=traj_set,
+                                time_pad_off=trial.time_pad_off, 
+                                cm_per_pixel=trial.cm_per_pixel)
 
-                trial_dict.append(df)
+            df = behavior.features
+            for col, val in trial.identity().items():
+                df[col] = [val] * len(df)
 
-            print(f"Number of trials where not all bodyparts where valid: {n}/{len(trial_dict)}")
-            self._behavior_df = pd.concat(trial_dict, ignore_index=True)
+            df["index_order"] = range(len(df))
+            df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
+            
+
+            trial_dict.append(df)
+
+        print(f"Number of trials where not all bodyparts where valid: {n}/{len(trial_dict)}")
+        self._behavior_df = pd.concat(trial_dict, ignore_index=True)
 
         return self._behavior_df
 
@@ -385,15 +422,14 @@ class TrialGroup(BaseTrialGroup):
 
     def lineplot_traj(self, save_as, bodypart: str = "finger_3", Beha = None): 
         data = self.kinematics_df()
-        data = data[["trial", bodypart]]
-        data.columns = data.columns.droplevel(0)
+        data = self.extract_bodypart_data(data, bodypart)
         return self._lineplot_traj(data=data, save_as=save_as, Beha=Beha,
                     title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
 
 
     def lineplot_traj_per_identity(self, save_as, bodypart: str = "finger_3"): 
         data = self.kinematics_df()
-        data = data[["trial", bodypart]]
+        data = self.extract_bodypart_data(data, bodypart)
         data.columns = data.columns.droplevel(0)
         return self._lineplot_traj_per_indentity(data=data, save_as=save_as,
                     title=f"{self.group_name}\n bp={bodypart}, n_trial={data['name'].nunique()}")
@@ -569,8 +605,7 @@ class TrialGroup(BaseTrialGroup):
 
     def plot_tendency_metrics(self, value , save_as, bodypart: str = "finger_3", show_units: bool=False, show_beha: str = "spatial_behavior"): 
         data = self.kinematics_df()
-        data = data[["trial", bodypart]]
-        data.columns = data.columns.droplevel(0)
+        data = self.extract_bodypart_data(data, bodypart)
         return self._lineplot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units, show_beha=show_beha,
                                   title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
 
@@ -905,7 +940,9 @@ class TrialGroup(BaseTrialGroup):
                             order: list[str] = ["Conti_LaserOff", "Beta_LaserOff", "Conti_LaserOn", "Beta_LaserOn"], 
                             merge_Off: bool = False) : 
 
-        data = self.scalar_df(bodypart)
+        data = self.scalar_df()
+        data = self.extract_bodypart_data(data, bodypart)
+
         if merge_Off: 
             data["laser_cond"] = np.where(data["laser_state"] == "LaserOff", data["laser_state"], data["laser_type"])        
         else : 
