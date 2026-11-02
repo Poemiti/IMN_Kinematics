@@ -405,7 +405,7 @@ class Project(BaseProject):
                 elif n_raw_outliers <= MAX_OUTLIER//2 or n_interpolated_outliers == 0:
                     tracking.update_status(bp, success=True, stage="outlier", reason="few out")
                     tracking.update_status(bp, success=True, stage="validation", reason="few out",
-                                                new_coords=inter_traj[["x", "y", "t"]], state="interpolated")
+                                                new_coords=inter_traj[["x", "y", "t", "likelihood"]], state="interpolated")
                     
                 elif n_raw_outliers > MAX_OUTLIER and longest_consecutive_outlier > MAX_OUTLIER//2:
                     tracking.update_status(bp, success=False, stage="outlier", reason=f"out cons>{MAX_OUTLIER//2}")
@@ -544,7 +544,7 @@ class Project(BaseProject):
                     tracking.update_status(bp, stage="validation", success=True, reason="man acc, raw", state="raw")
                 else:
                     tracking.update_status(bp, stage="validation", success=True, reason="man acc, inter", state="interpolated")
-                    tracking.load()
+                    tracking.load(only_valid=False)
                     interpolated_coords = tracking.interpolate_data(tracking.filter_outliers(tracking.coords_set[bp], DIST_THRESH, GAP))
                     tracking.coords_set[bp] = interpolated_coords
                     tracking.save_csv(trial.clean_pred_path)

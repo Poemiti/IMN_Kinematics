@@ -159,6 +159,8 @@ class DLCTracking(BaseDLCTracking):
         if only_valid: 
             bps = [bp for bp in self.bodyparts if self.status[bp].is_valid()]
             # print([f"{bp}: {stat}" for bp, stat in self.status.items()]) 
+            print(bps)
+
         else:
             bps = self.bodyparts
 

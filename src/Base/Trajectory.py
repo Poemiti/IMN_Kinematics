@@ -228,11 +228,13 @@ class Trajectory:
         return self.path_length(cropped_coords) / self.duration(cropped_coords)
 
 
-    def align_coordinates(self, ref_coords: pd.Dataframe, coords=None) -> pd.Dataframes:
+    def align_coordinates(self, ref_coords: pd.DataFrame, coords=None) -> pd.DataFrame:
         """
         Align self.coords to a ref_coords dataframe using an affine transformation.
         return the aligned version of self.coords
         """
+        # TODO
+
         from skimage.transform import estimate_transform
         if coords is None:
             coords = self.coords
@@ -700,7 +702,7 @@ class DLCTracking:
 
 
 
-    def _get_affine_transform(src, dst):
+    def _get_affine_transform(self, src, dst):
         """
         Calculate affine transformation from src to dst.
         src and dst: arrays of shape (4, 2)
@@ -718,7 +720,7 @@ class DLCTracking:
         return params
 
 
-    def _apply_transform(points, params):
+    def _apply_transform(self, points, params):
         """
         Apply affine transformation to coordinates.
         """
@@ -745,7 +747,7 @@ class DLCTracking:
         ref_names = list(ref_coords.keys())
 
         # Use the same reference coordinate system at every frame
-        for t in ref_coords[ref_name[0]].coords['t']:
+        for t in ref_coords[ref_names[0]].coords['t']:
 
             # Source reference coordinates at time t
             src = np.array([self.coords_set[ref].coords.loc[
@@ -760,7 +762,7 @@ class DLCTracking:
             ])
 
             # Calculate transformation
-            params = get_affine_transform(src, dst)
+            params = self.get_affine_transform(src, dst)
 
             # Transform every bodypart
             for bp in aligned:
@@ -770,7 +772,7 @@ class DLCTracking:
                 points = aligned[bp].loc[mask, ['x', 'y']].values
 
                 if len(points) > 0 and np.isfinite(points).all():
-                    transformed = apply_transform(points, params)
+                    transformed = self.apply_transform(points, params)
 
                     aligned[bp].loc[mask, ['x', 'y']] = transformed
 
