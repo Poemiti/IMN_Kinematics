@@ -193,7 +193,7 @@ class DLCTracking(BaseDLCTracking):
 
             x = coord["x"] - offset
             y = coord["y"] - offset
-
+    
             if ax is not None : 
                 ax.plot(x, y, label=label, color=color)
                 if marker : 

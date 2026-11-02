@@ -228,6 +228,25 @@ class Trajectory:
         return self.path_length(cropped_coords) / self.duration(cropped_coords)
 
 
+    def align_coordinates(self, ref_coords: pd.Dataframe, coords=None) -> pd.Dataframes:
+        """
+        Align self.coords to a ref_coords dataframe using an affine transformation.
+        return the aligned version of self.coords
+        """
+        from skimage.transform import estimate_transform
+        if coords is None:
+            coords = self.coords
+        
+        tform = estimate_transform('affine', coords, ref_coords)
+
+        aligned = coords.copy()
+
+        valid = aligned[['x', 'y']].notna().all(axis=1)
+        aligned.loc[valid, ['x', 'y']] = tform(aligned.loc[valid, ['x', 'y']].values)
+
+        return aligned
+
+
         
 
 
@@ -678,6 +697,84 @@ class DLCTracking:
             coords_interpolated[col] = interp_series
 
         return coords_interpolated
+
+
+
+    def _get_affine_transform(src, dst):
+        """
+        Calculate affine transformation from src to dst.
+        src and dst: arrays of shape (4, 2)
+        """
+
+        A = np.column_stack([
+            src[:, 0],
+            src[:, 1],
+            np.ones(len(src))
+        ])
+
+        # Solve for x and y transformations
+        params, _, _, _ = np.linalg.lstsq(A, dst, rcond=None)
+
+        return params
+
+
+    def _apply_transform(points, params):
+        """
+        Apply affine transformation to coordinates.
+        """
+
+        A = np.column_stack([
+            points[:, 0],
+            points[:, 1],
+            np.ones(len(points))
+        ])
+
+        return A @ params
+            
+
+    def align_to_ref(self, ref_coords: dict[str, Trajectory]) -> dict[str, TrajectoryDLC]:
+        """Align coords_set to a set of ref_coords
+        Ref coords must contain bodyparts present in the TrajectoryDLC set"""
+
+        aligned = {
+            bp: df.copy()
+            for bp, df in self.coords_set.items()
+            if bp not in ref_coords
+        }
+
+        ref_names = list(ref_coords.keys())
+
+        # Use the same reference coordinate system at every frame
+        for t in ref_coords[ref_name[0]].coords['t']:
+
+            # Source reference coordinates at time t
+            src = np.array([self.coords_set[ref].coords.loc[
+                    self.coords_set[ref].coords['t'] == t, ['x', 'y']].values[0]
+                    for ref in ref_names
+            ])
+
+            # Target reference coordinates
+            dst = np.array([ref_coords.coords[ref].loc[
+                    ref_coords[ref].coords['t'] == t, ['x', 'y']].values[0]
+                    for ref in ref_names
+            ])
+
+            # Calculate transformation
+            params = get_affine_transform(src, dst)
+
+            # Transform every bodypart
+            for bp in aligned:
+
+                mask = aligned[bp]['t'] == t
+
+                points = aligned[bp].loc[mask, ['x', 'y']].values
+
+                if len(points) > 0 and np.isfinite(points).all():
+                    transformed = apply_transform(points, params)
+
+                    aligned[bp].loc[mask, ['x', 'y']] = transformed
+
+        return aligned
 
 
     # --- validation ---

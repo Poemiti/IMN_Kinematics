@@ -115,7 +115,7 @@ class Behavior:
     
     def bodypart_distance(self, bp1: str = "soft_pad", bp2: str = "finger_3", 
                                coords_set: dict[str, Trajectory] | None = None) -> np.ndarray: 
-        """Compute the orientation angle (in degrees) of the segment
+        """Compute the distance between 2 bodyparts
         going from bp1 -> bp2, relative to the horizontal axis.
         """
         if coords_set is None:
