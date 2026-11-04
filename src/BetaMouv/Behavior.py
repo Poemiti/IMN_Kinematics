@@ -45,17 +45,43 @@ class Behavior:
         self.FRAME_HEIGHT_CM =  cfg["frame_height_px"] * self.cm_per_pixel
 
         # features building
-        self.centroid = Trajectory(self.compute_centroid())
-        self.features = self.compute_centroid()              # initilisation with centroid
-        self.features["area"] = self.area_triangle()
+        hand_bodyparts = [
+                "Hand_base", "Base_finger_2", "Base_finger_3",
+                "Phalanx_1_finger_2", "Phalanx_1_finger_3",
+                "finger_1", "finger_2", "finger_3", "soft_pad",
+            ]
+        
+        self.centroid = Trajectory(self.compute_centroid(hand_bodyparts))
+        self.features = self.compute_centroid(hand_bodyparts)              # initilisation with centroid
         self.features["centroid_direction"] = self.centroid.angle()
         self.features["centroid_velocity"] = self.centroid.instant_velocity()
         self.features["centroid_speed"] = self.centroid.instant_speed()
         self.features["centroid_acc"] = self.centroid.signed_acceleration()
-        self.features["f3_sp_distance"] = self.bodypart_distance()
-        self.features["f3_sp_angle"] = self.bodypart_angle()
-        self.features["centroid_lever_dist"] = self.centroid.obj_bodypart_distance(obj_coord=self.LEVER_POS)
+        self.features["centroid_jerk"] = self.centroid.signed_jerk()
+        # self.features["centroid_velocity_peak"] = self.centroid.signed_acceleration() # TODO
 
+        # distances
+        self.features["f2_sp_distance"] = self.bodypart_distance(bp1="finger_2", bp2="soft_pad")
+        self.features["frontPad_f3_distance"] = self.bodypart_distance(bp1="Front_PAD_corner", bp2="finger_3")
+        self.features["lever_f3_dist"] = self.bodypart_distance(bp1="Lever_corner", bp2="finger_3")
+
+        # angles
+        self.features["f2_sp_angle"] = self.bodypart_angle(bp1="finger_2", bp2="soft_pad")
+        self.features["lever_angle"] = self.bodypart_angle(bp1="Lever_base", bp2="Lever_corner")
+
+        # others
+        self.features["lever_velocity"] = self.coords_set["Lever_corner"].instant_velocity()
+        self.features["aperture_area"] = (self.bodyparts_area(["finger_3", "Phalanx_1_finger_3", "Base_finger_3", "Hand_base", "Base_finger_2", "Phalanx_1_finger_2", "finger_2"])
+                                        +
+                                        self.bodyparts_area(["soft_pad", "Hand_base", "Base_finger_2", "Phalanx_1_finger_2", "finger_2"]))
+        
+        self.features["f2_extension"] = ((self.bodypart_distance("finger_2", "Phalanx_1_finger_2") 
+                                        + self.bodypart_distance("Base_finger_2", "Phalanx_1_finger_2") )
+                                        / self.bodypart_distance("Base_finger_2", "finger_2"))
+        self.features["f3_extension"] = ((self.bodypart_distance("finger_3", "Phalanx_1_finger_3") 
+                                        + self.bodypart_distance("Base_finger_3", "Phalanx_1_finger_3") )
+                                        / self.bodypart_distance("Base_finger_3", "finger_3"))
+        
         # spatial zones based on centroid position 
         self.lever_right = 40 * self.cm_per_pixel
         self.lever_upper = 10 * self.cm_per_pixel
@@ -129,28 +155,22 @@ class Behavior:
 
         return np.sqrt(dx**2 + dy**2)
 
-    def compute_centroid(self, bp1: str = "soft_pad", bp2: str = "finger_3", bp3: str = "finger_2", 
-                 coords_set: dict[str, Trajectory] = None) -> pd.DataFrame: 
-        """Compute the position of a centroid point between 3 bodyparts"""
+    def compute_centroid(self, bodyparts: list[str], coords_set: dict[str, Trajectory] = None) -> pd.DataFrame: 
+        """Compute the position of a centroid point between bodyparts"""
         if coords_set is None:
             coords_set = self.coords_set
         
-        bodypart1 = coords_set[bp1].coords
-        bodypart2 = coords_set[bp2].coords
-        bodypart3 = coords_set[bp3].coords
+        coords = [coords_set[bp].coords for bp in bodyparts]
 
-        # print(len(bodypart1), len(bodypart2), len(bodypart3), len(bodypart1["t"]))
-
-
-        centroid_x = (bodypart1["x"] + bodypart2["x"] + bodypart3["x"]) / 3
-        centroid_y = (bodypart1["y"] + bodypart2["y"] + bodypart3["y"]) / 3
+        # Compute centroid
+        centroid_x = np.mean([bp["x"].to_numpy() for bp in coords], axis=0)
+        centroid_y = np.mean([bp["y"].to_numpy() for bp in coords], axis=0)
 
         return pd.DataFrame({
-            "x": centroid_x, 
-            "y": centroid_y, 
-            "t": bodypart1["t"]
+            "x": centroid_x,
+            "y": centroid_y,
+            "t": coords[0]["t"].to_numpy()
         })
-
 
     def area_triangle(self, bp1: str = "soft_pad", bp2: str = "finger_3", bp3: str = "finger_2", 
                  coords_set: dict[str, Trajectory] = None) -> np.array:
@@ -165,6 +185,32 @@ class Behavior:
 
         return  0.5 * abs(c1["x"]*c2["y"] + c2["x"]*c3["y"] + c3["x"]*c1["y"] - c1["y"]*c2["x"] - c2["y"]*c3["x"] - c3["y"]*c1["x"])
 
+
+    def bodyparts_area(self, bodyparts: list[str], coords_set:  dict[str, Trajectory] = None) -> np.array : 
+        """Returns area across as many bodyparts as listed in bodyparts
+        The order of the bodypart determines the order of the polygon vertices. They must not intersect!
+        """
+        if coords_set is None:
+            coords_set = self.coords_set
+
+
+        # Extract coordinates
+        coords = [coords_set[bp].coords[['x', 'y']].to_numpy()
+                for bp in bodyparts]
+
+        # Shape: (n_bodyparts, n_frames, 2)
+        coords = np.stack(coords, axis=0)
+
+        # Shoelace formula
+        x = coords[:, :, 0]
+        y = coords[:, :, 1]
+
+        area = 0.5 * np.abs(
+            np.sum(x * np.roll(y, -1, axis=0), axis=0)
+            - np.sum(y * np.roll(x, -1, axis=0), axis=0)
+        )
+
+        return area
 
 
     # def build_adjusted_boxes(self):

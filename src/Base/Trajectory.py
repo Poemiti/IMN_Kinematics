@@ -112,8 +112,12 @@ class Trajectory:
         return (np.sqrt(a["vx"]**2 + a["vy"]**2))
 
 
-    def signed_acceleration(self, coords=None):
+    def signed_acceleration(self, coords=None) -> pd.Series:
         return self.instant_velocity(coords).diff() / self.dt
+    
+    
+    def signed_jerk(self, coords=None): 
+        return self.signed_acceleration(coords).diff() / self.dt
 
 
     def obj_bodypart_distance(self, bodypart_coords: pd.DataFrame | None = None, obj_coord: list = [0,0]) -> np.array : 

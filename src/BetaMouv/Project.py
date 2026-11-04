@@ -572,11 +572,11 @@ class Project(BaseProject):
         output_dir = u.make_dir(analysis_dir / "trials_df")
 
         dfs = [
-            "trial_success",
-            "bodypart_success",
+            # "trial_success",
+            # "bodypart_success",
             "behavior",
-            "kinematics",
-            "scalar",
+            # "kinematics",
+            # "scalar",
         ]
 
         for df in dfs: 
