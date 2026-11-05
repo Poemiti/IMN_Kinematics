@@ -357,12 +357,12 @@ class TrialGroup(BaseTrialGroup):
                 df[col] = [val] * len(df)
 
             df["index_order"] = range(len(df))
-            df["relative_t"] = (df["t"] - trial.time_pad_off).round(3)
+            df["relative_t"] = (df["t"] - trial.time_pad_off).round(4)
             
 
             trial_dict.append(df)
 
-        print(f"Number of trials where not all bodyparts where valid: {n}/{len(trial_dict)}")
+        print(f"\nNumber of trials where not all bodyparts where valid: {n}/{len(trial_dict)}\n")
         self._behavior_df = pd.concat(trial_dict, ignore_index=True)
 
         return self._behavior_df
@@ -437,6 +437,7 @@ class TrialGroup(BaseTrialGroup):
  
     def lineplot_traj_centroid(self, save_as, Beha = None): 
         data = self.behavior_df()
+        data = self.clean_df(data)
         return self._lineplot_traj(data=data, save_as=save_as, Beha=Beha,
                     title=f"{self.group_name}\n centroid, n_trial={data['name'].nunique()}")
 
@@ -458,7 +459,7 @@ class TrialGroup(BaseTrialGroup):
         )
 
         mean_data =(data
-                    .groupby("index_order", as_index=False)[["x", "y"]]
+                    .groupby("relative_t", as_index=False)[["x", "y"]]
                     .mean())
 
         sns.lineplot(
@@ -609,7 +610,7 @@ class TrialGroup(BaseTrialGroup):
         return self._lineplot_tendency(data=data, save_as=save_as, x='relative_t', y=value, show_units=show_units, show_beha=show_beha,
                                   title=f"{value} over time\n bodypart= {bodypart}, n trials: {len(data.groupby('name'))}",)
 
-    def _lineplot_tendency(self, data, title, save_as: str, x="t", y="area", show_units: bool = False, show_beha: str="spatial_behavior"):
+    def _lineplot_tendency(self, data, title, save_as: str=None, x="t", y="area", show_units: bool = False, show_beha: str="spatial_behavior"):
 
 
         g = sns.FacetGrid(
@@ -650,8 +651,10 @@ class TrialGroup(BaseTrialGroup):
         g.figure.suptitle(title,  ha='center')
         g.figure.subplots_adjust(top=0.9)
 
-        g.savefig(save_as)
-        
+        if save_as is not None:
+            g.savefig(save_as)
+        else : 
+            plt.show()
         plt.close()
 
 

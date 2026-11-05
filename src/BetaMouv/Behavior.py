@@ -62,12 +62,13 @@ class Behavior:
 
         # distances
         self.features["f2_sp_distance"] = self.bodypart_distance(bp1="finger_2", bp2="soft_pad")
-        self.features["frontPad_f3_distance"] = self.bodypart_distance(bp1="Front_PAD_corner", bp2="finger_3")
+        self.features["BackPad_f3_distance"] = self.bodypart_distance(bp1="Back_PAD_corner", bp2="finger_3")
         self.features["lever_f3_dist"] = self.bodypart_distance(bp1="Lever_corner", bp2="finger_3")
 
         # angles
-        self.features["f2_sp_angle"] = self.bodypart_angle(bp1="finger_2", bp2="soft_pad")
-        self.features["lever_angle"] = self.bodypart_angle(bp1="Lever_base", bp2="Lever_corner")
+        self.features["f2_sp_angle"] = self.bodypart_angle(bp1="soft_pad", bp2="finger_2")
+        self.features["lever_angle"] = self.bodypart_angle(bp1="Lever_corner", bp2="Lever_base")
+        self.features["lever_direction"] = self.coords_set["Lever_corner"].angle()
 
         # others
         self.features["lever_velocity"] = self.coords_set["Lever_corner"].instant_velocity()
@@ -75,12 +76,14 @@ class Behavior:
                                         +
                                         self.bodyparts_area(["soft_pad", "Hand_base", "Base_finger_2", "Phalanx_1_finger_2", "finger_2"]))
         
-        self.features["f2_extension"] = ((self.bodypart_distance("finger_2", "Phalanx_1_finger_2") 
+        self.features["f2_extension"] = (self.bodypart_distance("Base_finger_2", "finger_2") /
+                                        (self.bodypart_distance("finger_2", "Phalanx_1_finger_2") 
                                         + self.bodypart_distance("Base_finger_2", "Phalanx_1_finger_2") )
-                                        / self.bodypart_distance("Base_finger_2", "finger_2"))
-        self.features["f3_extension"] = ((self.bodypart_distance("finger_3", "Phalanx_1_finger_3") 
+                                        )
+        self.features["f3_extension"] = (self.bodypart_distance("Base_finger_3", "finger_3") /
+                                        (self.bodypart_distance("finger_3", "Phalanx_1_finger_3") 
                                         + self.bodypart_distance("Base_finger_3", "Phalanx_1_finger_3") )
-                                        / self.bodypart_distance("Base_finger_3", "finger_3"))
+                                        )
         
         # spatial zones based on centroid position 
         self.lever_right = 40 * self.cm_per_pixel
@@ -344,18 +347,24 @@ def HMM_exploration(data, analysis_dir, load: Path | None = None):
             #     data[col + "_cos"] = np.cos(data[col])
 
             feature_cols = [
-                        "relative_t",
-                        "x", 
-                        "y",
-                        "area", 
-                        "centroid_direction", 
-                        "centroid_velocity", 
-                        "centroid_speed", 
-                        "centroid_acc", 
-                        "f3_sp_distance", 
-                        "f3_sp_angle", 
-                        "centroid_lever_dist",
-                        "spatial_state"
+                # "relative_t",
+                "x", 
+                "y",
+                "centroid_direction", 
+                "centroid_velocity", 
+                "centroid_speed", 
+                "centroid_acc", 
+                "centroid_jerk", 
+                "f2_sp_distance", 
+                "f2_sp_angle", 
+                "BackPad_f3_distance", 
+                "lever_f3_dist",
+                "lever_angle",
+                "lever_velocity",
+                "aperture_area",
+                "f2_extension",
+                "f3_extension",
+                # "lever_direction",
             ]
 
             data = data.sort_values(["name", "relative_t"]).reset_index(drop=True)
