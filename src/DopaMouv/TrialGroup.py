@@ -1,103 +1,77 @@
-# src/Base/TrialGroup.py
+# src/DopaMouv/TrialGroup.py
 
-from .Trial import Trial as BaseTrial
-import joblib, os, shutil
-from pathlib import Path
+
+from src.Base.TrialGroup import TrialGroup as BaseTrialGroup
+from src.BetaMouv.Statistics import Statistics
+
+from .Trial import Trial
+from .Trajectory import TrajectoryDLC, DLCTracking
+from .Behavior import Behavior
+from statannotations.Annotator import Annotator
+
 import pandas as pd
-from datetime import datetime
+import seaborn as sns
+import matplotlib.pyplot as plt
 from tqdm import tqdm
+import numpy as np 
+from pathlib import Path
+from datetime import datetime
 
 
-class TrialGroup:
-    """Manager to filter trials to use by their group name"""
+custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
 
-    trial_cls = BaseTrial  
-
-    def __init__(self, filenames: list[Path], condition: dict):
-        self.filenames = filenames
-        self.condition = condition
-
-        self.keep_val = []
-        for cond, criteria in self.condition.items():
-            self.keep_val.extend(value for value, keep in criteria.items() if keep)
-        self.group_name = "_".join(self.keep_val)
-        print("\n",self.group_name)
-
-        self.keep_joblib: list[str] = None
-        self.trials: list[BaseTrial] = None
-
-        
-
-    def load_trials(self) -> None : 
-        """Read joblib files and save trials in self.trials.
-        Display the number of joblib open and total number of trials"""
-        if self.trials is not None: 
-            return
-        self.keep_joblib = []
-        self.trials = self._filter_joblib()
-
-        print(f"--> {len(self.keep_joblib)}/{len(self.filenames)} FILES LOADED")
-        print(f"--> {len(self.trials)} trials")
+BOOL_PALETTE = {True: "yellowgreen", False: "tomato"}
 
 
-    def _filter_joblib(self) -> list[dict]:
-        trials = []
+LASER_STATE_PALETTE = {
+    "NOstim": "slategray",
+    "LaserOff" :"slategray",
+    "LaserOn" : "tomato"
+}
 
-        for filename in tqdm(self.filenames, desc="Loading joblib"):
-            if self._keep_file(filename):
+LASER_STATE_DASH = {
+    "LaserOff" : (4,2),
+    "LaserOn" : ""
+}
 
-                self.keep_joblib.append(filename)
-                records: list = joblib.load(filename)   # list of Trial objects
-                # print(f"{len(records)} added - {filename.stem}")
+LASER_STATE_HATCH = {          
+    "LaserOff": "oo",
+    "LaserOn": "",
+}
 
-                trials.extend(records)
-            # else:
-            #     print(f"Not Keep: {filename.name}")
+LASER_PERIOD_COLOR = "royalblue"
 
-        return trials
+BEHAVIOR_PALETTE = {
+    "reach": "yellow", 
+    "open": "orange", 
+    "grasp": "blue", 
+    "press": "green",
+    "none": "gray"
+}
 
-    def _keep_file(self, filename: Path) -> bool:
-        name = filename.name
+LASER_INTENSITY_PALETTE = {"low" : "lightblue",
+                            "high" : "salmon",
+                            "NOstim" : "gray"}
 
-        for condition, criteria in self.condition.items():
-            val_to_keep = [value for value, keep in criteria.items() if keep]
-
-            if val_to_keep and not any(value in name for value in val_to_keep):
-                return False
-
-            not_keep_val = [value for value, keep in criteria.items() if not keep]
-            if any(value in name for value in not_keep_val):
-                return False
-
-        return True
-
-    def save(self, output_dir: Path, trial_list: list = None):
-        by_group = {}
-
-        if trial_list is None : 
-            print("Saving trials from trialgroup")
-            trial_list = self.trials
-
-        for trial in trial_list:
-            by_group.setdefault(trial.group, []).append(trial)
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        for group, records in by_group.items():
-            path = output_dir / f"{group}.joblib"
-            tmp = path.with_name(path.name + ".tmp")
-            try:
-                joblib.dump(records, tmp)
-                if tmp.stat().st_size == 0:
-                    raise IOError(f"Refusing to write empty file: {path}")
-                os.replace(tmp, path)
-            finally:
-                tmp.unlink(missing_ok=True)
+LASER_INTENSITY_PALETTE_DARK = {"low" : "steelblue",
+                            "high" : "tomato",
+                            "NOstim" : "black"}
 
 
-    def save_backup(self, dir_to_copy: Path, output_dir: Path, step: str) -> None:
-        """Save trial metadata backup""" 
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup = output_dir / f"{step}_{stamp}"
-        shutil.copytree(dir_to_copy, backup)
-        print(f"Backup: {backup}")
+
+
+class TrialGroup(BaseTrialGroup): 
+
+    trial_cls = Trial
+
+    def __init__(self, filenames, condition):
+        super().__init__(filenames, condition)
+
+        self._trial_success_df = None
+        self._scalar_df = None
+        self._kinematics_df = None
+        self._bodypart_success_df = None
+        self._behavior_df = None
+
+        self.crop_laser_period = False

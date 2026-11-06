@@ -3,15 +3,14 @@
 from src.Base.Project import Project as BaseProject
 from src.Base.PathConfig import PathConfig
 import src.Base.gui.database_filter as Data_filter
-import src.Base.gui.preprocess_validator as Validator
 
 from .File import File
 from .Video import Video
 from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
-from .Trajectory import TrajectoryDLC, DLCTracking
-import src.BetaMouv.Behavior as Behavior
+# from .Trajectory import TrajectoryDLC, DLCTracking
+# import src.BetaMouv.Behavior as Behavior
 
 from pathlib import Path
 import yaml, joblib, sys, shutil, traceback
@@ -40,27 +39,26 @@ class Project(BaseProject):
         self.project_info: dict = u.load_config(self.config_dir / "project_info.yaml")
 
         # setup rules
-        # self.annotation_rules: dict = u.load_config(self.config_dir / "rules/annotation_rules.yaml")
+        self.annotation_rules: dict = u.load_config(self.config_dir / "rules/annotation_rules.yaml")
         # self.clip_duration_rules: dict = u.load_config(self.config_dir / "rules/clip_duration_rules.yaml")
         # self.exclusion_rules: dict = u.load_config(self.config_dir / "rules/exclusion_rules.yaml")
-        # self.camera_shift_rules: dict = u.load_config(self.config_dir / "rules/camera_shift_rules.yaml")
 
         # setup path
         self.paths: PathConfig = PathConfig(project_name=self.name, 
                                             model=Path(self.project_info["model_path"]), 
                                             raw_videos=Path(self.project_info["raw_videos_path"]))
 
-        # # trial group of the project
-        # joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
-        # if joblib_filenames == []: 
-        #     print("No Joblib metadata found")
-        #     self.trialgroup = None
-        # else: 
-        #     try:
-        #         self.trialgroup = (TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None)
-        #     except EOFError as e:
-        #         print(f"\nWARNING: Could not load joblib files: {e}")
-        #         self.trialgroup = None
+        # trial group of the project
+        joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
+        if joblib_filenames == []: 
+            print("No Joblib metadata found")
+            self.trialgroup = None
+        else: 
+            try:
+                self.trialgroup = (TrialGroup(joblib_filenames, self.conditions) if joblib_filenames else None)
+            except EOFError as e:
+                print(f"\nWARNING: Could not load joblib files: {e}")
+                self.trialgroup = None
 
 
     @process_time
@@ -141,4 +139,147 @@ class Project(BaseProject):
             print("\nDUPLICATE RAW PATHS:")
             print(duplicates_paths.to_string(index=False))
 
+
+
+    def build_metadata(self):
+        print(f"""
+        =============== Build Metadata ===============
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
+
+        joblib_files = list(self.paths.trials_metadata.glob("*.joblib"))
+        print(f"{len(joblib_files)} joblib metadata files ({self.paths.trials_metadata})")
+        res = input("Overwrite (o), update (u) or quit (q) ? : ").strip().lower()
+
+        if res in ("o", ""):
+            return self._run_metadata(update=False)
+        if res == "u":
+            return self._run_metadata(update=True)
+        if res == "q":
+            print("\nQuit !\n")
+            sys.exit()
+        raise ValueError(f"'{res}' is not valid, must be 'y', 'n' or 'q'")
+
+
+    @process_time
+    def _run_metadata(self, update: bool):
+
+        if update:
+            clip_paths = list(self.paths.raw.rglob("*.mp4"))
+        else:
+            clip_paths = list(Data_filter.load_database(File, self.paths.raw, self.paths.database, "*.mp4")["filename"])
+
+        trials_by_group, errors = {}, {}
+
+        for clip_path in tqdm(clip_paths, desc="Metadata update" if update else "Metadata init"):
+            try:
+                trial = self._process_clip(clip_path, update)
+                trial.to_yaml_dict()                   # strict check, nothing written yet
+            except Exception as e:
+                errors[str(clip_path)] = {
+                    "type": type(e).__name__,
+                    "message": str(e),
+                    "traceback": traceback.format_exc(),
+                }
+                continue
+            trials_by_group.setdefault(trial.group, []).append(trial)
+
+        #  report and decide BEFORE touching the disk 
+        u._save_error_report(output_dir=u.make_dir(self.paths.data_root / "logs"), 
+                             errors=errors, update=update)
+
+        n_ok = sum(len(t) for t in trials_by_group.values())
+        print(f"\n{n_ok} trials OK, {len(errors)} errors")
+
+        for p, e in list(errors.items())[:10]:
+            print(f"  {Path(p).name}: {e}")
+        if n_ok == 0 or len(errors) > 0.1 * len(clip_paths):
+            raise RuntimeError("Too many failures, nothing was written.")
+        if errors and input("Errors found. Save anyway? (y/n) : ").lower() != "y":
+            print("Aborted, nothing written.")
+            return
+
+        #  backup, then write 
+
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup = self.paths.data_root / "trials_metadata_backup" / f"metabuilding_{stamp}"
+        shutil.copytree(self.paths.trials_metadata, backup)
+        print(f"Backup: {backup}")
+
+        # save yaml
+
+        print("\nSaving YAML")
+        for group, trials in trials_by_group.items():
+            for t in tqdm(trials, desc=f"Saving {group}"):
+                t.save_yaml()      
+
+        # save joblib
+
+        for group, trials in tqdm(trials_by_group.items(), desc="Saving joblib"):
+            u.save(u.make_path(self.paths.trials_metadata, f"{group}.joblib"),
+                   lambda p, t=trials: joblib.dump(t, p),)
+
+        if self.trialgroup is None: 
+            joblib_filenames = list(self.paths.trials_metadata.glob("*.joblib"))
+            self.trialgroup = TrialGroup(joblib_filenames, self.conditions)
+        else: 
+            self.trialgroup.trials = [trial
+                    for trial_list in trials_by_group.values()
+                    for trial in trial_list
+                ]
+
+    def _process_clip(self, clip_path, update: bool) -> Trial:
+        trial = Trial(clip_path=clip_path)
+        previous = None
+
+        # get the raw video path it comes from
+        raw_video_df = pd.read_csv(trial.clip_path.parent.parent / "metadata.csv")
+        raw_path = raw_video_df.loc[raw_video_df["clean_name"] == trial.name[:-8], "raw_path"]
+        trial.update(raw_video_path=raw_path)
+
+        # 1. is the clip usable?
+        if update:
+            previous = Trial(clip_path=clip_path)
+            previous.load_yaml()
+            readable = previous.trial_outcomes["clip_openable"].success
+        else:
+            clip = Video(clip_path)
+            readable = clip.is_openable and clip.is_readable
+
+        if not readable:
+            for stage in trial.STAGES:
+                trial.set_success(stage=stage, success=False, reason="Clip not readable")
+            trial.set_group(laser_state="UNKNOWN")
+            return trial
+
+        trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
+        
+        # 2. the ONLY step that differs: LED info
+        if update:
+            trial.update(
+                task=previous.task,
+                laser_state=previous.laser_state,
+                time_pad_off=previous.time_pad_off,
+                time_laser_on=previous.time_laser_on,
+                time_reward=previous.time_reward,
+            )
+        else:
+            rule_key = {
+                "view": trial.camera_view,
+                "month": trial.file.date.month,
+            }
+            annotation = u.match_rule(rule_key, self.annotation_rules)
+            trial.set_led_info(Leds(video_path=clip_path, label_studio_annotation=annotation, 
+                                    fig_output_path=trial.clip_path.parent / f'{trial.name}.html', 
+                                    csv_output_path=trial.clip_path.parent / f'{trial.name}.csv'))
+
+        trial.set_task_success(self.project_info["laser_on_duration"])
+        trial.set_group()
+
+        pred_path = trial.file.path.parent / f"pred_results_{trial.name}.csv"
+        if pred_path.exists():
+            trial.update(pred_path=str(pred_path))
+        
+        return trial
 

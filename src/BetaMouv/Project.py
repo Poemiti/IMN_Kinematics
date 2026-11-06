@@ -2,8 +2,6 @@
 
 from src.Base.Project import Project as BaseProject
 from src.Base.PathConfig import PathConfig
-import src.Base.gui.database_filter as Data_filter
-import src.Base.gui.preprocess_validator as Validator
 
 from .File import File
 from .Video import Video
@@ -20,9 +18,11 @@ from tqdm import tqdm
 from datetime import datetime
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
 
 import src.utils as u
+import src.Base.gui.database_filter as Data_filter
+import src.Base.gui.preprocess_validator as Validator
+import matplotlib.pyplot as plt
 
 # nohup python3 -u main.py > main.out &
 # tail -f main.out 

@@ -1,178 +1,137 @@
-# src/Base/Trial.py
+# src/DopaMouv/Trial.py
 
+from src.Base.Trial import Trial as BaseTrial
+from .Leds import Leds
+from .File import File
 
-from pathlib import Path
-import yaml, os
 import pandas as pd
-from datetime import date, datetime
-from typing import get_type_hints
+from pathlib import Path
+from datetime import datetime
 
-from src.Base.Outcome import Outcome
 
-try:
-    from yaml import CSafeDumper as SafeDumper
-except ImportError:
-    from yaml import SafeDumper
+class Trial(BaseTrial):
+    STAGES = ("clip_openable", "task") # order is important, all done in "build_metadata"
+    
+    IDENTITY_FIELDS = (
+        "name", "clip_path", "raw_video_path", "date", "camera_view", "clip_number", 
+        "handedness", "subject",
+        "condition", "cue_condition", "cue_declared", "laser_test", 
+        "protocol", "pulse_type", "pulse_num", "pulse_freq",  
+        "session", "subsession", "laser_state",
+        "time_pad_off", "time_laser_on", "time_reward", 
+        "group", "trial_outcomes", "task",
+    )
 
-class Trial:
-    FIELDS: tuple = ()          # everything — goes into joblib as-is
-    YAML_FIELDS: tuple = ()     # subset that gets written to the per-trial yaml
-    STAGES: tuple = ()
+    SCALAR_METRICS = (
+        "avg_velocity_laser_period", 
+        "tortuosity_laser_period", "tortuosity_pad_to_lever", 
+    )
 
-    clip_path: Path
-    yaml_path: Path
-    trial_outcomes: dict[str, Outcome]
+    FIELDS = BaseTrial.FIELDS + IDENTITY_FIELDS + SCALAR_METRICS + (
+        # from filename
+        "frame_width_cm", "cm_per_pixel", "frame_width_px",
 
-    def __init__(self, clip_path: str, yaml_path: str = None):
-        self.clip_path: Path = clip_path
-        self.yaml_path: Path = Path(yaml_path) if yaml_path else Path(clip_path).with_suffix(".yaml")
+        # computed after prediction and metadata_building
+        "pred_path", "clean_pred_path", "trajectories"
+    )
 
-        self.trial_outcomes: dict[str, Outcome] = {
-                    name: Outcome(stage=name, order=i) 
-                    for i, name in enumerate(self.STAGES)
-                }
+    YAML_FIELDS = tuple(f for f in FIELDS)
         
     # methods to save or updates Trial attributs
+    def __init__(self, clip_path: str, yaml_path: str = None):
+        super().__init__(clip_path, yaml_path)
+
+        self.file = File(clip_path)
+
+        # identity fields, filled immediately from the parsed filename
+        self.name: str = self.file.name
+        self.clip_path: Path = self.file.path
+        self.date: datetime = self.file.date
+        self.camera_view: str = self.file.camera_view
+        self.clip_number: int = self.file.clip_number
+        self.handedness: str = self.file.handedness
+        self.subject: str = self.file.subject
+        self.condition: str = self.file.condition
+        self.cue_condition: str = self.file.cue_condition
+        self.cue_declared: str = self.file.cue_type
+        self.laser_test: str = self.file.laser_test
+        self.protocol: str = self.file.protocol
+        self.pulse_type: str = self.file.pulse_type 
+        self.pulse_num: str = self.file.pulse_num    
+        self.pulse_frec: str = self.file.pulse_frec    
+        self.session: str = self.file.session
+        self.subsession: str = self.file.subsession
+
+        self.frame_width_px: str = self.file.frame_width_px
+        self.frame_width_cm: str = self.file.frame_width_cm
+        self.cm_per_pixel: str = self.file.cm_per_pixel
+
+        # pipeline-computed fields, unknown at construction time
+        # set after build_metadata
+        self.raw_video_path: Path = None
+        self.task: str = None
+        self.laser_state: str = None
+        self.time_pad_off: float = None
+        self.time_laser_on: float = None
+        self.time_reward: float = None
+        self.group: str = None
+
+        # set after prediction
+        self.pred_path: Path = None
+        self.clean_pred_path: Path = self.pred_path.parent / f"clean_{self.pred_path.stem}.csv" if self.pred_path else None
+
+        # set after preprocessing + validation
+        self.trajectories: dict[str, dict] = {}
         
-    def update(self, **kwargs):
-        for key, value in kwargs.items():
-            if key not in self.FIELDS:
-                raise AttributeError(f"'{key}' is not a declared field of {type(self).__name__}")
-            setattr(self, key, value)
-        return self
-
-    def to_dict(self) -> dict:
-        """Native objects, untouched — used for joblib (object identity preserved)."""
-        return {f: getattr(self, f, None) for f in self.FIELDS}
-
-    def from_dict(self, data: dict):
-        types = get_type_hints(self.__class__)
-
-        for f in self.YAML_FIELDS:
-
-            if f in data:
-                value = data[f]
-                field_type = types.get(f)
-
-                if value is not None:
-
-                    if f=="trial_outcomes": 
-                        value = {
-                                name: Outcome(stage=name, order=out["order"], success=out["success"], reason=out["reason"]) 
-                                for name, out in value.items()
-                            }
-
-                    elif field_type is Path:
-                        value = Path(value)
-
-                    elif field_type is datetime:
-                        value = datetime.fromisoformat(value)
-
-                setattr(self, f, value)
-        return self
-
-    @staticmethod
-    def _serialize_value(value):
-        """Convert one value into something yaml.safe_dump can handle."""
-        if isinstance(value, (datetime, date)):
-            return value.isoformat()
-        if isinstance(value, Path):
-            return str(value)
-        if isinstance(value, dict):
-            return {k: Trial._serialize_value(v) for k, v in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [Trial._serialize_value(v) for v in value]
-        if hasattr(value, "to_dict"):          # e.g. a Trajectory-like object
-            return value.to_dict()
-        return value
-
-    def to_yaml_dict(self) -> dict:
-        fields = self.YAML_FIELDS or self.FIELDS
-        return {f: self._serialize_value(getattr(self, f, None)) for f in fields}
-
-    def save_yaml(self, path=None):
-        path = Path(path or self.yaml_path)
-
-        # 1. everything that can fail happens BEFORE any file is touched
-        data = self.to_yaml_dict()
-        if not data:
-            raise ValueError(f"Trial '{self.name}': refusing to save empty YAML")
-        text = yaml.dump(data, Dumper=SafeDumper, sort_keys=False)
-        if not text.strip():
-            raise ValueError(f"Trial '{self.name}': YAML text is empty")
-
-        # 2. write to a temp file, then swap it in
-        tmp = path.with_name(path.name + ".tmp")
-        try:
-            with open(tmp, "w") as f:
-                f.write(text)
-            # the file is closed here, so the size on disk is real
-            if tmp.stat().st_size == 0:
-                raise IOError(f"Refusing to write empty file: {path}")
-            os.replace(tmp, path)
-        finally:
-            tmp.unlink(missing_ok=True)   
-
-    def load_yaml(self, path=None):
-        path = path or self.yaml_path
-        with open(path, "r") as f:
-            data = yaml.safe_load(f)
-        return self.from_dict(data)
-
-    # methods related to success of trials
-
-    def set_success(self, stage: str, success: bool, reason: str):
-        outcome = self.trial_outcomes.get(stage)
-        if outcome is None:
-            raise ValueError(f"Unknown stage '{stage}' — declared: {self.STAGES}")
-        outcome.success = success
-        outcome.reason = reason
-
-    def is_valid(self, upto: str = None) -> bool:
-        limit = self.trial_outcomes[upto].order if upto else float("inf")
-        return all(o.success for o in self.trial_outcomes.values() if o.order <= limit)
-
-    def failure(self) -> str:
-        for outcome in sorted(self.trial_outcomes.values()):
-            if not outcome.success:
-                return outcome.reason
-        return "successful"
-
-
-    def dlc_predict(self, model_path: Path, 
-                    output_csv_path : Path = None) -> pd.DataFrame:
-        import tempfile
-        import deeplabcut
-        from deeplabcut.pose_estimation_pytorch import set_load_weights_only
-
-        set_load_weights_only(False)
-
-        with tempfile.TemporaryDirectory() as dlc_dest:
-            # print(dlc_dest)
-            deeplabcut.analyze_videos(
-                f'{model_path}/config.yaml',
-                [str(self.clip_path)],
-                save_as_csv=False,
-                # gputouse=0,
-                destfolder=dlc_dest
-            )
-
-            h5_file = next(Path(dlc_dest).glob("*.h5"), None)
-            df = pd.read_hdf(h5_file)
-
-        df.index.name="frame_num"
-
-        if output_csv_path : 
-            df.to_csv(output_csv_path)
-
-        return df
-
-
-
-if __name__ == "__main__": 
-
-    trial1 = Trial(clip_path=Path("/home/poemiti/IMN_Kinematics/data/BetaMouv/Rat_#531LeftHanded_20240526_ContiMT300_RightHemiCHR_L1-60_L2-40_C001H001S0003_clip_00.mp4"),)
-
-    print(trial1)
-    trial1.save_trial()
+    def bodypart_valid(self, bodypart: str) -> bool:
+            traj = self.trajectories.get(bodypart)
+            return self.is_valid() and traj is not None and traj.is_valid()
+            
     
+    def identity(self) -> dict:
+        return {f: getattr(self, f, None) for f in self.IDENTITY_FIELDS}
+
+
+    def set_led_info(self, led_obj: Leds):
+        self.update(
+            task=led_obj.task,
+            laser_state=led_obj.laser_state,
+            time_pad_off=led_obj.time_pad_off,
+            time_laser_on=led_obj.time_laser_on,
+            time_reward=led_obj.time_reward,
+        )
+
+    def set_group(self, laser_state: str = None):
+        if laser_state is None: 
+            laser_state= self.laser_state
+
+
+        self.update(group=(
+            f"{self.subject}_{self.condition}_{self.cue_condition}_{self.laser_test}_"
+            f"{self.protocol}_{self.pulse_num}"
+            f"{self.camera_view}View_{self.laser_intensity}_{laser_state}"
+        ))
+
+
+    def set_task_success(self, laser_duration: int) : 
+        """Set if the rat did the correct task
+        A correct task is when the rat lift the paw associated with the task.
+        Unsuccessful is when the paw we're looking at has not been lift in time"""
+        if self.task == "noCue": 
+            self.set_success(stage="task", success=False, reason = "Rejected, no cue detected")
+
+        elif self.task is None: 
+            self.set_success(stage="task", success=False, reason = "Rejected, clip not readable")
+        
+        elif self.time_pad_off == 0 : 
+            self.set_success(stage="task", success=False, reason = "Rejected, bad split video")
+
+        elif self.time_pad_off is None:
+            self.set_success(stage="task", success=False, reason = "Rejected, no pad off")
+
+        elif self.time_laser_on is not None and self.time_laser_on + laser_duration > 3:
+            self.set_success(stage="task", success=False, reason = "Rejected, late pad off")
+
+        else : 
+            self.set_success(stage="task", success=True, reason = "Successful, paw lifted")
+

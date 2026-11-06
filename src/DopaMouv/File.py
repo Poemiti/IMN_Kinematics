@@ -13,9 +13,8 @@ class File(BaseFile):
         # get metadata out of the filename
         trial_metadata = self.parse_filename()
 
-        self.date = trial_metadata["date"]
         self.camera_view = trial_metadata["camera_view"]
-        # self.date = datetime.strptime(trial_metadata["date"], "%Y%m%d").date()
+        self.date = datetime.strptime(trial_metadata["date"], "%Y%m%d").date()
         self.clip_number = int(trial_metadata["clip"]) if trial_metadata["clip"] != "Unknown" else None
         self.subject = trial_metadata["subject"]
         self.condition = trial_metadata["condition"]
@@ -38,7 +37,7 @@ class File(BaseFile):
 
     def build_full_name(self): 
         meta = [
-            self.subject, self.handedness, self.date, self.condition,
+            self.subject, self.handedness, self.date.isoformat(), self.condition,
             self.cue_condition, self.cue_type,  self.laser_test,self.protocol, 
             f"{self.pulse_type}", f"{str(self.pulse_num)}p", self.pulse_frec,
             self.camera_view, self.session, self.subsession
@@ -61,8 +60,8 @@ class File(BaseFile):
                 "protocol": r"opto_[^/_]+_\d+%",
                 "handedness": r"(Left|Righthand|Ambi)",
                 "pulse_type": r"Stop|FULL",
-                "pulse_num": r"\d+(?=p\d+Hz)",
-                "pulse_frec": r"(?<=\dp)\d+Hz",
+                "pulse_num": r"\d+(?=p)",
+                "pulse_frec": r"\d+Hz",
                 "camera_view": r"(RightCam|LeftCam)",
                 "date": r"(?<!\d)20\d{6}(?!\d)",
                 "clip": r"clip_(\d+)",

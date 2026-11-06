@@ -105,7 +105,7 @@ class Leds:
 
         # save as a csv file
         if self.csv_output_path is not None : 
-            luminosity_df.to_csv(self.csv_ouput_path)
+            luminosity_df.to_csv(self.csv_output_path)
 
         return luminosity_df
 

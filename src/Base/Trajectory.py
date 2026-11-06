@@ -766,7 +766,7 @@ class DLCTracking:
             ])
 
             # Calculate transformation
-            params = self.get_affine_transform(src, dst)
+            params = self._get_affine_transform(src, dst)
 
             # Transform every bodypart
             for bp in aligned:
@@ -776,7 +776,7 @@ class DLCTracking:
                 points = aligned[bp].loc[mask, ['x', 'y']].values
 
                 if len(points) > 0 and np.isfinite(points).all():
-                    transformed = self.apply_transform(points, params)
+                    transformed = self._apply_transform(points, params)
 
                     aligned[bp].loc[mask, ['x', 'y']] = transformed
 
