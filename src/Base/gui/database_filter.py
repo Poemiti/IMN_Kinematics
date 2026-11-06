@@ -211,14 +211,9 @@ class Model:                # focus on filtration manipulation
 
 
 
-def load_database(files_path, database_path, source: str): 
+def load_database(File_cls, files_path, database_path: Path, suffix: str): 
 
-    if source == "video" :
-        raw_database = make_database(files_path, is_video)
-    elif source == "csv" : 
-        raw_database = make_database(files_path, is_csv)
-    else : 
-        raise ValueError("Invalid source. Available source are :\n\tcsv \n\tvideo \nChange source type in 'config.yaml'")    
+    raw_database = make_database(File_cls, files_path, suffix)
 
     model = Model(raw_database, database_path)
     view = View()
@@ -234,6 +229,7 @@ def load_database(files_path, database_path, source: str):
 
     # save database
     if controller.dataset_name.get() :
+        database_path.mkdir(parents=True, exist_ok=True)
         dataset_name = f"{controller.dataset_name.get().strip()}.csv"
         database.to_csv(database_path / dataset_name)
         print(f"\nFiltered dataset saved as : {database_path / dataset_name}")
@@ -244,7 +240,7 @@ def load_database(files_path, database_path, source: str):
 
 
 
-def make_database(root_dir : Path, satisfy_condition):
+def make_database(File_cls, root_dir : Path, suffix):
     """
     Build a database of video metadata from a directory tree.
     The directory is recursively scanned, and files satisfying
@@ -254,47 +250,19 @@ def make_database(root_dir : Path, satisfy_condition):
     ----------
     root_dir : str or pathlib.Path
         Root directory to scan.
-    satisfy_condition : callable
-        Function that takes a filename and returns True if it
-        should be included.
+    suffix : str
+        suffix to browse files
 
     Returns
     -------
     pandas.DataFrame
         DataFrame containing extracted metadata for all matching files.
     """
-    from src.BetaMouv.File import File
 
     sorted_videos = []
-    for file_path in root_dir.rglob("*.*"):
+    for file_path in root_dir.rglob(suffix):
 
-        file = File(file_path)
-
-        if satisfy_condition(file.path.name):
-            file.classify_file(sorted_videos)
+        file = File_cls(file_path)
+        file.classify_file(sorted_videos)
 
     return pd.DataFrame(sorted_videos)
-
-
-
-
-def is_video(filename : str) -> bool : 
-    """
-    Check if a file is a video file.
-    Supported video formats are ``.avi`` and ``.mp4``.
-    """
-    video_extensions = (".avi", ".mp4")
-    return filename.lower().endswith(video_extensions)
-
-
-def is_csv(filename : str) -> bool : 
-    """
-    Check if a file is CSV
-    """
-    return filename.lower().endswith(".csv")
-
-
-
-if __name__ == "__main__" : 
-
-    print("No main")

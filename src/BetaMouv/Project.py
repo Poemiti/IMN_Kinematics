@@ -2,8 +2,11 @@
 
 from src.Base.Project import Project as BaseProject
 from src.Base.PathConfig import PathConfig
-from .Video import Video
+import src.Base.gui.database_filter as Data_filter
+import src.Base.gui.preprocess_validator as Validator
 
+from .File import File
+from .Video import Video
 from .Trial import Trial
 from .TrialGroup import TrialGroup
 from .Leds import Leds
@@ -17,11 +20,9 @@ from tqdm import tqdm
 from datetime import datetime
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 import src.utils as u
-import src.BetaMouv.gui.database_filter as Data_filter
-import src.BetaMouv.gui.preprocess_validator as Validator
-import matplotlib.pyplot as plt
 
 # nohup python3 -u main.py > main.out &
 # tail -f main.out 
@@ -71,7 +72,7 @@ class Project(BaseProject):
         Config directory: {self.config_dir}
         ==============================================\n""")
 
-        dataset = list(Data_filter.load_database(
+        dataset = list(Data_filter.load_database(File, 
                 self.paths.raw_videos, self.paths.database, "video")["filename"])
 
         for i, video_path in enumerate(dataset): 
