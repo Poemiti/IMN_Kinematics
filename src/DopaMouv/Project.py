@@ -40,7 +40,7 @@ class Project(BaseProject):
 
         # setup rules
         self.annotation_rules: dict = u.load_config(self.config_dir / "rules/annotation_rules.yaml")
-        # self.clip_duration_rules: dict = u.load_config(self.config_dir / "rules/clip_duration_rules.yaml")
+        self.clip_duration_rules: dict = u.load_config(self.config_dir / "rules/clip_duration_rules.yaml")
         # self.exclusion_rules: dict = u.load_config(self.config_dir / "rules/exclusion_rules.yaml")
 
         # setup path
@@ -80,19 +80,20 @@ class Project(BaseProject):
 
             raw_video = Video(video_path=video_path)
 
-            output_dir = u.make_dir(self.paths.raw / f"{raw_video.file.subject}"/ raw_video.full_name)
+            output_dir = u.make_dir(self.paths.raw / f"{raw_video.file.subject}"/ raw_video.clean_name)
             subject = raw_video.file.subject            
 
-            clip_duration = 12.5    # sec
+            meta = {"date": raw_video.date.isoformat()}
+            clip_duration = u.match_rule(meta, self.clip_duration_rules)
 
             if subject not in records : 
                 records[subject] = []
 
-            rec = {"subject": subject, "raw_path": video_path, "clean_name": raw_video.full_name, "clip_duration": clip_duration}
+            rec = {"subject": subject, "raw_path": video_path, "clean_name": raw_video.clean_name, "clip_duration": clip_duration}
             records[subject].append(rec)
             all_records.append(rec)
 
-            print(f"\nSplitting video : {raw_video.full_name}")
+            print(f"\nSplitting video : {raw_video.clean_name}")
             print(f"clip duration: {clip_duration}")
 
             if (list(output_dir.glob("*.mp4"))) == [] : 
@@ -202,10 +203,11 @@ class Project(BaseProject):
 
         #  backup, then write 
 
-        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup = self.paths.data_root / "trials_metadata_backup" / f"metabuilding_{stamp}"
-        shutil.copytree(self.paths.trials_metadata, backup)
-        print(f"Backup: {backup}")
+        if self.paths.trials_metadata.exists() and len(list(self.paths.trials_metadata.glob("*.joblib"))) > 0: 
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup = u.make_dir(self.paths.data_root / "trials_metadata_backup" / f"metabuilding_{stamp}")
+            shutil.copytree(self.paths.trials_metadata, backup, dirs_exist_ok=True)
+            print(f"Backup: {backup}")
 
         # save yaml
 
@@ -250,7 +252,7 @@ class Project(BaseProject):
         if not readable:
             for stage in trial.STAGES:
                 trial.set_success(stage=stage, success=False, reason="Clip not readable")
-            trial.set_group(laser_state="UNKNOWN")
+            trial.set_group(laser_state="UNKNOWN", task="UNKNOWN")
             return trial
 
         trial.set_success(stage="clip_openable", success=True, reason="Clip openable")
@@ -266,13 +268,16 @@ class Project(BaseProject):
             )
         else:
             rule_key = {
+                "subject": trial.subject,
                 "view": trial.camera_view,
                 "month": trial.file.date.month,
             }
             annotation = u.match_rule(rule_key, self.annotation_rules)
+            print(rule_key, " --> " , annotation)
             trial.set_led_info(Leds(video_path=clip_path, label_studio_annotation=annotation, 
-                                    fig_output_path=trial.clip_path.parent / f'{trial.name}.html', 
-                                    csv_output_path=trial.clip_path.parent / f'{trial.name}.csv'))
+                                    # fig_output_path=trial.clip_path.parent / f'{trial.name}.html', 
+                                    # csv_output_path=trial.clip_path.parent / f'{trial.name}_luminosity.csv'
+                                    ))
 
         trial.set_task_success(self.project_info["laser_on_duration"])
         trial.set_group()
@@ -282,4 +287,64 @@ class Project(BaseProject):
             trial.update(pred_path=str(pred_path))
         
         return trial
+
+
+    @process_time
+    def run_prediction(self): 
+        self.trialgroup.load_trials()
+        print(f"""
+        ================= Prediction =================
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
+
+        for trial in tqdm(self.trialgroup.trials, desc="Prediction"):
+            if not trial.is_valid() or trial.time_pad_off is None : 
+                continue
+
+            output_path = trial.clip_path.parent / f"pred_results_{trial.name}.csv"
+            clean_pred_path = trial.clip_path.parent / f"clean_pred_results_{trial.name}.csv"   # will be used later
+            trial.update(pred_path=output_path, clean_pred_path=clean_pred_path)
+
+            trial.save_yaml()
+
+            if output_path.exists(): 
+                print(f"{output_path} already exist, prediction skipped!")
+                continue 
+
+            # prediction 
+            trial.dlc_predict(model_path=self.paths.model,
+                              output_csv_path=output_path)
+
+        #  backup, save joblib
+        self.trialgroup.save_backup(dir_to_copy=self.paths.trials_metadata, output_dir=self.paths.data_root / "trials_metadata_backup", 
+                                    step="prediction")
+        self.trialgroup.save(self.paths.trials_metadata)
+
+
+
+    @process_time 
+    def compute_metrics(self): 
+        self.trialgroup.load_trials()
+        print(f"""
+        ============== Compute Metrics ===============
+        Project name: {self.name}
+        Config directory: {self.config_dir}
+        ==============================================\n""")
+
+        analysis_dir = self.paths.analysis(self.trialgroup.keep_val)
+        output_dir = u.make_dir(analysis_dir / "trials_df")
+
+        dfs = [
+            "trial_success",
+            "bodypart_success",
+            # "behavior",
+            "kinematics",
+            # "scalar",
+        ]
+
+        for df in dfs: 
+            (output_dir / f"{df}.csv").unlink(missing_ok=True)  # remove old one to replace (if exists)
+            self.trialgroup.build_df(output_dir, df)
+
 

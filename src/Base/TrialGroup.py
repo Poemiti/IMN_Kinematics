@@ -6,6 +6,16 @@ from pathlib import Path
 import pandas as pd
 from datetime import datetime
 from tqdm import tqdm
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+
+custom_params = {"axes.spines.right": False, "axes.spines.top": False}
+sns.set_theme("talk", style="ticks", rc=custom_params, palette="pastel")
+
+BOOL_PALETTE = {True: "yellowgreen", False: "tomato"}
+
 
 
 class TrialGroup:
@@ -25,6 +35,12 @@ class TrialGroup:
 
         self.keep_joblib: list[str] = None
         self.trials: list[BaseTrial] = None
+
+        self._trial_success_df = None
+        self._bodypart_success_df = None
+        self._scalar_df = None
+        self._kinematics_df = None
+        self._behavior_df = None
 
         
 
@@ -101,3 +117,254 @@ class TrialGroup:
         backup = output_dir / f"{step}_{stamp}"
         shutil.copytree(dir_to_copy, backup)
         print(f"Backup: {backup}")
+
+
+    ####################### data preprocess before plotting #############################
+
+
+    def extract_bodypart_data(self, df: pd.MultiIndex, bodypart) -> pd.DataFrame: 
+        """Take a Multindex and return a clean dataframe for the specified bodypart"""
+        if bodypart not in df.columns.get_level_values(0):
+            raise KeyError(f"Body part '{bodypart}' not found in DataFrame")
+        
+        bodypart_data = df[bodypart]
+        mask = bodypart_data.notna().all(axis=1)
+
+        return pd.concat([df["trial"], bodypart_data], axis=1).loc[mask]
+
+
+    def trial_success_df(self) -> pd.DataFrame:
+        """One row per trial, including failures — for QC / yield figures
+        (e.g. success rate by condition, why trials were excluded)."""
+
+        if self._trial_success_df is not None:
+            return self._trial_success_df
+        
+        records = []
+
+        for trial in self.trials:
+
+            for stage, outcome in trial.trial_outcomes.items():
+                records.append(trial.identity() | {
+                        "stage": stage,
+                        "success": outcome.success,
+                        "reason": outcome.reason,
+                        "is_valid": "valid" if trial.is_valid() else "not_valid",
+                        "failing_step": trial.failure()                        
+                        })
+
+        res = pd.DataFrame(records)
+        self._success_df = res
+
+        return res
+
+
+    def bodypart_success_df(self) -> pd.DataFrame:
+        """One row per (trial, bodypart, stage) — for per-bodypart QC figures."""
+
+        if self._bodypart_success_df is not None:
+            return self._bodypart_success_df
+
+        records = []
+        for trial in self.trials:
+            for bodypart, stat in trial.trajectories.items():
+                    for stage, outcome in stat["stage_outcomes"].items():
+
+                        records.append(trial.identity() | {
+                            "bodypart": bodypart,
+                            "stage": stage,
+                            "success": outcome["success"],
+                            "reason": outcome["reason"],
+                        })
+
+        res = pd.DataFrame(records)
+        self._bodypart_success_df = res
+            
+        return res
+
+
+    ####################### plotting ###################################################
+
+
+
+    def _countplot_success_rate(self, df, col, save_as, show: bool = False,):
+        """Display success rate and failure reasons per stage, and save the report."""
+
+        g = sns.catplot(
+            data=df, kind="count",
+            y="reason",
+            row="stage", col=col,
+            hue="success", palette=BOOL_PALETTE,
+            sharey=False, height=4, aspect=3,
+        )
+
+        # add count on bars
+        for ax in g.axes.flat: 
+            for container in ax.containers: 
+                ax.bar_label(container, fmt="%d", padding=3)
+        
+        # g.set_xticklabels(rotation=45, ha="right")
+        g.set_axis_labels("Number of trials", "")
+        g.set_titles(row_template="{row_name}")
+        g.figure.suptitle(f"Success rate by stage - n_trials: {len(df['name'].unique())}\n{self.group_name}")
+        g.figure.subplots_adjust(top=0.90)
+
+        g.figure.savefig(save_as, bbox_inches="tight")
+        if show: 
+            plt.show()
+        plt.close()
+
+        print(f"Report saved to: {save_as}")
+
+
+
+
+    def _lineplot_traj(self, data, save_as, title: str, Beha = None):
+
+        fig, ax = plt.subplots()
+
+        # Individual trajectories
+        sns.lineplot(
+            data=data,
+            x="x", y="y",
+            units="name",
+            estimator=None,
+            sort=False,
+            color="gray",
+            alpha=0.2,
+            legend=False, ax=ax, zorder=-1
+        )
+
+        mean_data =(data
+                    .groupby("relative_t", as_index=False)[["x", "y"]]
+                    .mean())
+
+        sns.lineplot(
+            data=mean_data,
+            x="x", y="y",
+            color="red",
+            linewidth=3,
+            sort=False,
+            label="Mean trajectory", estimator=None, 
+        )
+
+        # plot lever + pad
+
+        XL, YL = (55, 282)   # lever position (px)
+        XP, YP = (250, 164)  # pad position (px)
+        
+        frame_width_px = 512
+        frame_width_cm = 8.7
+        cm_per_pixel = frame_width_cm / frame_width_px
+
+        ax.scatter(x=XL*cm_per_pixel, y=YL*cm_per_pixel, color="k", zorder=1, lw=5)
+        ax.hlines(y=YP*cm_per_pixel, xmin=90*cm_per_pixel, xmax=XP*cm_per_pixel, color="k", lw=5)
+
+        if Beha is not None: 
+            Beha.draw_boxes(ax)
+            # ax.set_xlim(0, 6)
+            ax.set_ylim(2, 6)
+
+        plt.title(title)
+        plt.xlabel("x (cm)")
+        plt.ylabel("y (cm)")
+
+        plt.savefig(save_as)
+        plt.close()
+
+
+
+
+    def sunburst_metadata(self, output_dir: Path, title: str,
+                        subfig_group: str = None,
+                        groups: list[str] = ["subject", "view"],
+                        show_total: bool = True):
+        """Generate a sunburst figure in the order of the groups given. 
+        If a subfig_group is given, it will split into has many sunburst as they are subfig.
+        The outpath will follow the groups order."""
+        import plotly.express as px
+        from plotly.subplots import make_subplots
+
+        data = self.trial_success_df()
+        data = data.drop_duplicates(subset="name", keep="first")
+
+        filename = "_".join(groups)
+        if subfig_group: 
+            filename = subfig_group.upper() + "_" + filename
+        save_as = output_dir / filename 
+
+        # ---------------- CASE 1: no subfig_groups
+
+        if subfig_group is None:
+            counts = (
+                data
+                .groupby(groups)
+                .size()
+                .reset_index(name="count")
+            )
+
+            fig = px.sunburst(
+                counts,
+                path=groups,
+                values="count",
+                color_discrete_sequence=px.colors.qualitative.D3   
+            )
+
+            fig.update_layout(title=title)
+
+            fig.update_traces(
+                branchvalues="total" if show_total else "remainder",
+                texttemplate="<b>%{label}</b><br>%{value} (%{percentParent:.0%})",
+                textfont_size=25
+            )
+
+            fig.write_html(str(save_as.with_suffix(".html")))
+            fig.show()
+            return
+
+        # ---------------- CASE 2: subfig_groups
+
+        subgroups = sorted(data[subfig_group].dropna().unique())
+
+        fig = make_subplots(
+            rows=1,
+            cols=len(subgroups),
+            specs=[[{"type": "domain"}] * len(subgroups)],
+            subplot_titles=subgroups
+        )
+
+        for i, g in enumerate(subgroups, start=1):
+
+            tmp = data[data[subfig_group] == g]
+
+            counts = (
+                tmp
+                .groupby(groups)
+                .size()
+                .reset_index(name="count")
+            )
+
+            pie = px.sunburst(
+                counts,
+                path=groups,
+                values="count",
+                color=groups[0],
+                color_discrete_sequence=px.colors.qualitative.D3     
+            )
+
+            fig.add_trace(
+                pie.data[0],
+                row=1,
+                col=i
+            )
+
+        fig.update_traces(
+            branchvalues="total",
+            texttemplate="<b>%{label}</b><br>%{value} (%{percentParent:.0%})",
+            textfont_size=25
+        )
+
+        fig.update_layout(title=title)
+
+        fig.write_html(str(save_as.with_suffix(".html")), openauto=True)
+        fig.show()

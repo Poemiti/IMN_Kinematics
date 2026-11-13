@@ -7,6 +7,7 @@ class Project:
 
     def __init__(self, name: str):
         self.name = name
+        print(f"========== Project : {self.name}")
 
     def __str__(self):
         desc = f"""

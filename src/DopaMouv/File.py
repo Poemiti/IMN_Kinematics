@@ -33,11 +33,11 @@ class File(BaseFile):
         self.frame_width_cm = 8.7 if self.camera_view == "left" else 8.3
         self.cm_per_pixel = self.frame_width_cm / self.frame_width_px
 
-        self.full_name = self.build_full_name()
+        self.clean_name = self.build_clean_name(date=trial_metadata["date"])
 
-    def build_full_name(self): 
+    def build_clean_name(self, date: str): 
         meta = [
-            self.subject, self.handedness, self.date.isoformat(), self.condition,
+            self.subject, self.handedness, date, self.condition,
             self.cue_condition, self.cue_type,  self.laser_test,self.protocol, 
             f"{self.pulse_type}", f"{str(self.pulse_num)}p", self.pulse_frec,
             self.camera_view, self.session, self.subsession

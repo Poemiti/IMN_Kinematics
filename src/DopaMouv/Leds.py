@@ -20,7 +20,7 @@ class Leds(BaseLed):
         self.task_pad = "LED_3" if self.task == "CueS1" else "LED_2"
 
         self.time_pad_off = self.get_time_led_state(self.task_pad, "OFF", min_duration=10,  in_sec=True)
-        self.time_laser_on = self.get_time_led_state("LED_4", "ON", in_sec=True)
+        self.time_laser_on = self.get_time_led_state("LED_4", "ON", in_sec=True, min_duration=1) # very short pulse
         self.time_reward = self.get_time_led_state( "LED_5", "ON", in_sec=True)
         self.laser_state = "LaserOn" if self.time_laser_on is not None else "LaserOff"
 
@@ -64,7 +64,7 @@ class Leds(BaseLed):
             if luminosity >= threshold:
                 time += 1
 
-            elif time > min_duration:
+            elif time >= min_duration:
                 activation_durations.append(time)
                 time = 0
 
@@ -72,7 +72,7 @@ class Leds(BaseLed):
                 time = 0
 
         # Account for an activation that extends to the last frame
-        if time > min_duration:
+        if time >= min_duration:
             activation_durations.append(time)
 
         cue_count = len(activation_durations)
@@ -110,7 +110,7 @@ class Leds(BaseLed):
                     start_index = t
                 consecutive += 1
 
-                if consecutive > min_duration:
+                if consecutive >= min_duration:
                     return True, start_index
             else:
                 consecutive = 0

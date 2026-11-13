@@ -29,10 +29,10 @@ class Trial(BaseTrial):
 
     FIELDS = BaseTrial.FIELDS + IDENTITY_FIELDS + SCALAR_METRICS + (
         # from filename
-        "frame_width_cm", "cm_per_pixel", "frame_width_px",
+        "frame_width_cm", "cm_per_pixel", "frame_width_px", 
 
         # computed after prediction and metadata_building
-        "pred_path", "clean_pred_path", "trajectories"
+        "pred_path", "clean_pred_path", "trajectories", "labelstudio_annot"
     )
 
     YAML_FIELDS = tuple(f for f in FIELDS)
@@ -75,6 +75,7 @@ class Trial(BaseTrial):
         self.time_laser_on: float = None
         self.time_reward: float = None
         self.group: str = None
+        self.labelstudio_annot: int = None
 
         # set after prediction
         self.pred_path: Path = None
@@ -99,17 +100,20 @@ class Trial(BaseTrial):
             time_pad_off=led_obj.time_pad_off,
             time_laser_on=led_obj.time_laser_on,
             time_reward=led_obj.time_reward,
+            labelstudio_annot=led_obj.annotation_num,
         )
 
-    def set_group(self, laser_state: str = None):
+    def set_group(self, laser_state: str = None, task: str = None):
         if laser_state is None: 
             laser_state= self.laser_state
+        if task is None: 
+            task=self.task
 
 
         self.update(group=(
             f"{self.subject}_{self.condition}_{self.cue_condition}_{self.laser_test}_"
-            f"{self.protocol}_{self.pulse_num}"
-            f"{self.camera_view}View_{self.laser_intensity}_{laser_state}"
+            f"{self.protocol}_{self.pulse_num}p_{task}_"
+            f"{self.camera_view}_{laser_state}"
         ))
 
 
@@ -122,15 +126,6 @@ class Trial(BaseTrial):
 
         elif self.task is None: 
             self.set_success(stage="task", success=False, reason = "Rejected, clip not readable")
-        
-        elif self.time_pad_off == 0 : 
-            self.set_success(stage="task", success=False, reason = "Rejected, bad split video")
-
-        elif self.time_pad_off is None:
-            self.set_success(stage="task", success=False, reason = "Rejected, no pad off")
-
-        elif self.time_laser_on is not None and self.time_laser_on + laser_duration > 3:
-            self.set_success(stage="task", success=False, reason = "Rejected, late pad off")
 
         else : 
             self.set_success(stage="task", success=True, reason = "Successful, paw lifted")
